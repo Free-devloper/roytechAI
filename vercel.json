@@ -1,5 +1,9 @@
 {
   "framework": "vite",
   "buildCommand": "npm run build",
-  "outputDirectory": "dist/client"
+  "outputDirectory": "dist/client",
+  "rewrites": [
+    { "source": "/blog", "destination": "/blog/index.html" },
+    { "source": "/((?!assets/|robots.txt|sitemap.xml).*)", "destination": "/index.html" }
+  ]
 }
