@@ -13,8 +13,10 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "RoyTech AI",
-  description: "RoyTech AI builds MVPs, custom software, and delivery squads for ambitious teams.",
+  title: "RoyTech AI | Rehan Ghafoor",
+  description: "RoyTech AI by Rehan Ghafoor builds MVPs, custom software, and delivery squads for ambitious teams.",
+  authors: [{ name: "Rehan Ghafoor" }],
+  creator: "Rehan Ghafoor",
   other: {
     "codex-preview": "development",
   },

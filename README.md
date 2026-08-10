@@ -1,6 +1,8 @@
-# vinext-starter
+# RoyTech AI Portfolio
 
-A clean full-stack starter running on
+**Author:** Rehan Ghafoor
+
+A clean full-stack portfolio studio website running on
 [vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and
 Drizzle support.
 
