@@ -35,3 +35,6 @@ fi
 if [[ -f "${script_dir}/validate-artifact.sh" ]]; then
   bash "${script_dir}/validate-artifact.sh" || true
 fi
+
+mkdir -p "${SITES_PROJECT_ROOT}/.next"
+echo "vinext-build" > "${SITES_PROJECT_ROOT}/.next/BUILD_ID"
