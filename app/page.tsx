@@ -188,7 +188,7 @@ ESTIMATED BUDGET: ${money.format(detailedEstimate.low)} – ${money.format(detai
         <nav className={menu ? "navigation open" : "navigation"} aria-label="Primary navigation">
           <a href="#why" onClick={closeMenu}>Why RoyTech AI</a>
           <div className="nav-drop"><button type="button" onClick={() => setCapabilities(!capabilities)} aria-expanded={capabilities}>Capabilities <b className={capabilities ? "up" : ""}>⌄</b></button><div className={capabilities ? "nav-popover shown" : "nav-popover"}>{services.slice(0, 5).map(([num, title]) => <a href="#services" onClick={closeMenu} key={num}><small>{num}</small><span>{title}</span></a>)}</div></div>
-          <a href="#method" onClick={closeMenu}>Delivery model</a><a href="#estimator" onClick={closeMenu}>Detailed Estimator</a><a href="#contact" onClick={closeMenu}>Contact</a>
+          <a href="#method" onClick={closeMenu}>Delivery model</a><a href="#estimator" onClick={closeMenu}>Detailed Estimator</a><a href="/blog" onClick={closeMenu}>Blog</a><a href="#contact" onClick={closeMenu}>Contact</a>
         </nav>
         <a className="button header-button" href="#contact" onClick={closeMenu}>Start a build <Arrow /></a>
       </header>
