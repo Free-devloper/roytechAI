@@ -165,7 +165,7 @@ export default function BlogPage() {
   // Handle Admin Passcode Auth
   const handleAuthSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (adminPasscode === "roytech2026" || adminPasscode === "admin") {
+    if (adminPasscode === "letmein@321") {
       setIsAuthenticated(true);
       setAuthError("");
     } else {
@@ -366,7 +366,7 @@ export default function BlogPage() {
                   Admin Passcode
                   <input
                     type="password"
-                    placeholder="Enter passcode (Default: roytech2026)"
+                    placeholder="Enter author passcode"
                     value={adminPasscode}
                     onChange={(e) => setAdminPasscode(e.target.value)}
                     required
@@ -377,7 +377,6 @@ export default function BlogPage() {
                 <button type="submit" className="button full-btn">
                   Verify & Unlock Studio ↗
                 </button>
-                <small className="hint-text">Author Key: <code>roytech2026</code></small>
               </form>
             ) : (
               /* RICH MARKDOWN PUBLISHER FORM */
