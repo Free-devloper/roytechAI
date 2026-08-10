@@ -83,6 +83,17 @@ export default function Home() {
   const [sent, setSent] = useState(false);
   const [briefText, setBriefText] = useState("");
 
+  const [serviceFilter, setServiceFilter] = useState("All");
+
+  const filteredServices = useMemo(() => {
+    if (serviceFilter === "All") return services;
+    if (serviceFilter === "AI & Agents") return services.filter(([_, title, __, tags]) => tags.includes("RAG") || tags.includes("AGENTS") || title.toLowerCase().includes("ai"));
+    if (serviceFilter === "MVP & SaaS") return services.filter(([_, title, __, tags]) => tags.includes("SCOPE") || tags.includes("SAAS") || title.toLowerCase().includes("mvp"));
+    if (serviceFilter === "Modernization") return services.filter(([_, title, __, tags]) => tags.includes("APIS") || tags.includes("CRM") || title.toLowerCase().includes("legacy"));
+    if (serviceFilter === "Squads") return services.filter(([_, title, __, tags]) => tags.includes("PRODUCT") || title.toLowerCase().includes("squad"));
+    return services;
+  }, [serviceFilter]);
+
   // Detailed Estimator State
   const [selectedScope, setSelectedScope] = useState<ProjectScope>("AI Agentic System");
   const [selectedAiFeatures, setSelectedAiFeatures] = useState<string[]>(["rag", "agents"]);
@@ -185,7 +196,39 @@ ESTIMATED BUDGET: ${money.format(detailedEstimate.low)} – ${money.format(detai
 
       <section className="section page-pad dark-panel" id="why"><div className="heading split"><div><p className="eyebrow"><i /> A BETTER DELIVERY PARTNER</p><h2>More momentum. Less vendor drag.</h2></div><p>A great software partner should lower the cognitive load on your team. We make the product, tradeoffs, progress, and ownership clear from the beginning.</p></div><div className="frictions"><article><span>/ 01</span><h3>Context disappears in handoffs.</h3><p>When a project changes hands too often, customer insight and technical judgment disappear with it.</p></article><article><span>/ 02</span><h3>Busy work hides the real release.</h3><p>Long plans and status updates should never be a substitute for working software in front of the right people.</p></article><article><span>/ 03</span><h3>More hours do not mean more leverage.</h3><p>We focus the team on customer value, reliable systems, and decisions that compound after the first launch.</p></article></div></section>
 
-      <section className="section page-pad services" id="services"><div className="heading align-end"><div><p className="eyebrow"><i /> WHAT WE MAKE</p><h2>One team for the product you need to unlock.</h2></div><a className="link" href="#contact">Tell us what is blocked <Arrow /></a></div><div className="service-grid">{services.map(([number, title, text, tags]) => <article key={number}><div><span>{number}</span><b>↗</b></div><h3>{title}</h3><p>{text}</p><small>{tags}</small></article>)}</div></section>
+      <section className="section page-pad services" id="services">
+        <div className="heading align-end">
+          <div>
+            <p className="eyebrow"><i /> WHAT WE MAKE</p>
+            <h2>One team for the product you need to unlock.</h2>
+          </div>
+          <a className="link" href="#contact">Tell us what is blocked <Arrow /></a>
+        </div>
+
+        <div className="service-tabs">
+          {["All", "AI & Agents", "MVP & SaaS", "Modernization", "Squads"].map((cat) => (
+            <button
+              type="button"
+              key={cat}
+              className={`service-tab-btn ${serviceFilter === cat ? "active" : ""}`}
+              onClick={() => setServiceFilter(cat)}
+            >
+              {cat}
+            </button>
+          ))}
+        </div>
+
+        <div className="service-grid">
+          {filteredServices.map(([number, title, text, tags]) => (
+            <article key={number}>
+              <div><span>{number}</span><b>↗</b></div>
+              <h3>{title}</h3>
+              <p>{text}</p>
+              <small>{tags}</small>
+            </article>
+          ))}
+        </div>
+      </section>
 
       <section className="section page-pad method" id="method"><div className="heading split"><div><p className="eyebrow"><i /> THE ROYTECH AI METHOD</p><h2>AI accelerates the work. Product judgment keeps it useful.</h2></div><p>We use AI for research, boilerplate, test coverage, documentation, and iteration—while engineers stay accountable for architecture, quality, security, and release.</p></div><div className="method-board"><div><span>AI-NATIVE PRODUCT LOOP</span><span>INPUT → OUTPUT</span></div><p>Product brief <b>→</b> Scope & system map <b>→</b> AI-augmented build <b>→</b> Tested release</p><footer>{["Model selection", "Human review", "Automated QA", "Evaluation sets", "Observability", "Documented handover"].map((x) => <span key={x}>{x}</span>)}</footer></div><div className="steps">{steps.map(([number, label, title, text]) => <article key={number}><span>{number}</span><div><small>{label}</small><h3>{title}</h3></div><p>{text}</p></article>)}</div></section>
 
