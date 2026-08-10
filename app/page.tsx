@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 type ProjectScope = "AI Agentic System" | "Full-Stack SaaS" | "Enterprise Platform" | "Mobile + Web App";
 
@@ -168,11 +168,17 @@ ESTIMATED BUDGET: ${money.format(detailedEstimate.low)} – ${money.format(detai
     setCapabilities(false);
   };
 
+  useEffect(() => {
+    const handleScroll = () => {
+      setMenu(false);
+      setCapabilities(false);
+    };
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    return () => window.removeEventListener("scroll", handleScroll);
+  }, []);
+
   return (
     <main id="top">
-      {(menu || capabilities) && (
-        <div className="nav-backdrop" onClick={closeMenu} aria-hidden="true" />
-      )}
       <header className="site-header">
         <a className="brand" href="#top" aria-label="RoyTech AI home" onClick={closeMenu}><span className="mark"><i /><i /><i /></span>RoyTech<sup>AI</sup></a>
         <button className={menu ? "menu-button open" : "menu-button"} type="button" onClick={() => setMenu(!menu)} aria-label="Toggle navigation" aria-expanded={menu}>
