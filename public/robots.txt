@@ -1,0 +1,8 @@
+# Robots.txt for RoyTech AI | Rehan Ghafoor
+# Host: https://www.roytechworkforce.com
+
+User-agent: *
+Allow: /
+
+# Sitemap Location
+Sitemap: https://www.roytechworkforce.com/sitemap.xml

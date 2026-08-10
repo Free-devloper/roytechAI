@@ -1,4 +1,4 @@
-import { writeFile } from "node:fs/promises";
+import { writeFile, copyFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import path from "node:path";
 
@@ -29,6 +29,15 @@ async function main() {
     console.log(`Prerendered index.html successfully (${html.length} bytes).`);
   } else {
     console.error(`Failed to prerender index.html: HTTP ${response.status}`);
+  }
+
+  // Copy robots.txt and sitemap.xml to dist/client output
+  try {
+    await copyFile("public/robots.txt", "dist/client/robots.txt");
+    await copyFile("public/sitemap.xml", "dist/client/sitemap.xml");
+    console.log("Copied robots.txt & sitemap.xml to dist/client.");
+  } catch (err) {
+    console.warn("Could not copy robots.txt / sitemap.xml:", err);
   }
 }
 
