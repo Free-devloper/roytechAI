@@ -15,107 +15,12 @@ interface BlogPost {
   content: string;
 }
 
-const INITIAL_POSTS: BlogPost[] = [
-  {
-    id: "multi-agent-systems-2026",
-    title: "Building Production-Grade Multi-Agent Systems in 2026",
-    slug: "multi-agent-systems-2026",
-    category: "AI & Agents",
-    date: "2026-08-08",
-    readTime: "6 min read",
-    author: "Rehan Ghafoor",
-    excerpt: "A practical breakdown of autonomous agent routing, tool orchestration, fallback state machines, and model evaluations for high-scale enterprise apps.",
-    content: `## The Architecture of Autonomous AI Agents
+import INITIAL_POSTS from "./data/posts.json";
 
-Building AI agents that work reliably in production requires moving past naive prompt loops. At **RoyTech AI**, we design agentic systems with deterministic state machines and strict validation guardrails.
-
-### Key Components of Production Multi-Agent Systems
-
-1. **Task Router & Dispatcher**: Evaluates user intent and dispatches tasks to specialist agents (e.g., Data Analyst, Code Generator, QA Inspector).
-2. **Tool Orchestration & Schema Validation**: Ensures tool calls conform strictly to Pydantic/TypeScript schemas before execution.
-3. **Fallback & Recovery Loops**: Automatic retry handlers when an LLM hallucination or tool error occurs.
-4. **Automated Evaluation Sets**: Continuous benchmarking using evaluation frameworks to test accuracy and latency.
-
-\`\`\`python
-# Example Agent Routing Handler (FastAPI / LangChain)
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-
-app = FastAPI(title="RoyTech AI Agent Orchestrator")
-
-class AgentTask(BaseModel):
-    query: str
-    context: dict
-
-@app.post("/api/agents/execute")
-async def execute_agent_workflow(task: AgentTask):
-    # Dispatch to specialized agent pipeline
-    return {"status": "success", "result": "Agent completed task autonomously"}
-\`\`\`
-
-### Summary
-Multi-agent systems provide immense leverage when paired with robust software engineering practices.
-`
-  },
-  {
-    id: "rag-hybrid-vector-search",
-    title: "Why RAG + Hybrid Vector Search Beat Plain LLM Context",
-    slug: "rag-hybrid-vector-search",
-    category: "Architecture",
-    date: "2026-08-01",
-    readTime: "5 min read",
-    author: "Rehan Ghafoor",
-    excerpt: "Context window sizes are growing, but precision retrieval with PgVector, BM25 hybrid search, and cross-encoder re-ranking remains the gold standard for data governance.",
-    content: `## Modern Retrieval-Augmented Generation (RAG)
-
-While large language models now feature multi-million token context windows, feeding entire document repositories into context is expensive, slow, and prone to "middle-of-the-needle" retrieval loss.
-
-### The 3-Tier Retrieval Pipeline
-
-* **Tier 1: Sparse Retrieval (BM25)** — Catches exact keyword matches, SKU numbers, and strict technical terminology.
-* **Tier 2: Dense Embeddings (PgVector / Qdrant)** — Captures semantic intent and conceptual similarity.
-* **Tier 3: Cross-Encoder Re-ranking** — Re-orders top candidate chunks for maximum precision.
-
-\`\`\`sql
--- Hybrid Vector Search Query in PostgreSQL (PgVector)
-SELECT id, document_title, content, 
-       (1 - (embedding <=> $1)) AS similarity_score
-FROM knowledge_chunks
-WHERE organization_id = $2
-ORDER BY similarity_score DESC
-LIMIT 10;
-\`\`\`
-
-### Conclusion
-Combining hybrid search with domain-specific guardrails ensures knowledge assistants remain accurate, fast, and secure.
-`
-  },
-  {
-    id: "mvp-delivery-guide",
-    title: "The Founder's Guide to Shipping a Useful MVP in 3 Weeks",
-    slug: "mvp-delivery-guide",
-    category: "Product Strategy",
-    date: "2026-07-25",
-    readTime: "4 min read",
-    author: "Rehan Ghafoor",
-    excerpt: "How senior product engineering squads cut unnecessary scope drag and turn ambitious business problems into tested, operating software fast.",
-    content: `## Shipping Without Vendor Drag
-
-Speed is the ultimate advantage for early-stage products. The goal of an MVP is not to build a stripped-down broken app, but to build the **smallest useful release** that answers a core customer thesis.
-
-### The RoyTech AI 3-Week Delivery Model
-
-* **Week 1: Framing & System Mapping** — Define core release goals, UX workflows, database schemas, and API contracts.
-* **Week 2: Focused Build Sprints** — Deliver working software daily with automated CI/CD and visible feedback loops.
-* **Week 3: Launch & Handover** — Production deployment, load testing, security review, and full code handover.
-
-> "Working software in front of real customers will always beat long status documents."
-`
-  }
-];
+const initialPostsData = INITIAL_POSTS as BlogPost[];
 
 export default function BlogPage() {
-  const [posts, setPosts] = useState<BlogPost[]>(INITIAL_POSTS);
+  const [posts, setPosts] = useState<BlogPost[]>(initialPostsData);
   const [selectedCategory, setSelectedCategory] = useState<string>("All");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [activePost, setActivePost] = useState<BlogPost | null>(null);
