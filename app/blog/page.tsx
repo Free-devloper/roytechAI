@@ -162,10 +162,25 @@ export default function BlogPage() {
     });
   }, [posts, selectedCategory, searchQuery]);
 
+const EXPECTED_HASH = "fc767f373f24caf9ecd1a937bc3904f9925f7706a3166d14433ed3cf3bb183b2";
+
+async function verifyPasscodeHash(passcode: string): Promise<boolean> {
+  try {
+    const msgBuffer = new TextEncoder().encode(passcode + "_roytech_salt_2026");
+    const hashBuffer = await crypto.subtle.digest("SHA-256", msgBuffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const hexHash = hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+    return hexHash === EXPECTED_HASH;
+  } catch {
+    return false;
+  }
+}
+
   // Handle Admin Passcode Auth
-  const handleAuthSubmit = (e: React.FormEvent) => {
+  const handleAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (adminPasscode === "letmein@321") {
+    const isValid = await verifyPasscodeHash(adminPasscode);
+    if (isValid) {
       setIsAuthenticated(true);
       setAuthError("");
     } else {
