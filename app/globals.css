@@ -104,3 +104,97 @@
   .scope-grid, .feature-toggle-grid { grid-template-columns: 1fr; }
   .pace-grid { grid-template-columns: 1fr; }
 }
+
+/* Transparent Nav Backdrop to prevent stuck states */
+.nav-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background: rgba(11, 54, 84, 0.05);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+
+/* 3D Visual & Perspective Enhancements */
+.console {
+  perspective: 1000px;
+  transform-style: preserve-3d;
+  transform: perspective(1000px) rotateX(2deg) rotateY(-4deg);
+  transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: -15px 25px 60px rgba(11, 54, 84, 0.22), 0 0 35px rgba(66, 184, 244, 0.25);
+  border-radius: 12px;
+}
+
+.console:hover {
+  transform: perspective(1000px) rotateX(0deg) rotateY(0deg) translateZ(15px) scale(1.02);
+  box-shadow: 0 30px 80px rgba(11, 54, 84, 0.28), 0 0 50px rgba(66, 184, 244, 0.35);
+}
+
+.console-flow div {
+  transition: all 0.3s ease;
+  transform-style: preserve-3d;
+}
+
+.console-flow div:hover {
+  transform: translateZ(10px) scale(1.03);
+  background: rgba(66, 184, 244, 0.15);
+  border-radius: 6px;
+  box-shadow: 0 8px 20px rgba(66, 184, 244, 0.18);
+}
+
+/* 3D Floating Levitation for Metrics */
+.hero-metrics div {
+  animation: floatLevitate 5s ease-in-out infinite alternate;
+}
+.hero-metrics div:nth-child(2) {
+  animation-delay: 1.2s;
+}
+.hero-metrics div:nth-child(3) {
+  animation-delay: 2.4s;
+}
+
+@keyframes floatLevitate {
+  0% { transform: translateY(0px); }
+  100% { transform: translateY(-6px); }
+}
+
+/* 3D Interactive Card Tilts for Service & Solution Grids */
+.service-grid article, .solution-grid article, .proof-grid article {
+  transform-style: preserve-3d;
+  transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  border-radius: 10px;
+}
+
+.service-grid article:hover, .solution-grid article:hover, .proof-grid article:hover {
+  transform: perspective(1000px) rotateX(3deg) rotateY(-2deg) translateZ(12px) scale(1.02);
+  box-shadow: 0 20px 45px rgba(11, 54, 84, 0.18), 0 0 25px rgba(66, 184, 244, 0.22);
+  border-color: var(--lime);
+  background: #ffffff;
+  z-index: 5;
+}
+
+/* 3D Estimator Panels */
+.estimator-layout {
+  perspective: 1200px;
+  transform-style: preserve-3d;
+}
+
+.estimator-summary {
+  transform-style: preserve-3d;
+  transition: all 0.4s ease;
+}
+
+.estimator-summary:hover {
+  transform: translateZ(10px) scale(1.01);
+  box-shadow: 0 25px 60px rgba(9, 42, 66, 0.38), 0 0 30px rgba(66, 184, 244, 0.3);
+}
+
+.scope-card {
+  transform-style: preserve-3d;
+}
+
+.scope-card:hover {
+  transform: perspective(800px) rotateX(-2deg) translateZ(8px);
+  box-shadow: 0 10px 25px rgba(66, 184, 244, 0.18);
+}
+

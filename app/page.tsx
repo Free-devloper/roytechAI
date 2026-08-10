@@ -152,22 +152,28 @@ ESTIMATED BUDGET: ${money.format(detailedEstimate.low)} – ${money.format(detai
     event.preventDefault();
     setSent(true);
   };
-  const closeMenu = () => setMenu(false);
+  const closeMenu = () => {
+    setMenu(false);
+    setCapabilities(false);
+  };
 
   return (
     <main id="top">
+      {(menu || capabilities) && (
+        <div className="nav-backdrop" onClick={closeMenu} aria-hidden="true" />
+      )}
       <header className="site-header">
-        <a className="brand" href="#top" aria-label="RoyTech AI home"><span className="mark"><i /><i /><i /></span>RoyTech<sup>AI</sup></a>
+        <a className="brand" href="#top" aria-label="RoyTech AI home" onClick={closeMenu}><span className="mark"><i /><i /><i /></span>RoyTech<sup>AI</sup></a>
         <button className={menu ? "menu-button open" : "menu-button"} type="button" onClick={() => setMenu(!menu)} aria-label="Toggle navigation" aria-expanded={menu}>
           <span className="menu-icon"><i /><i /><i /></span>
           <span className="menu-text">{menu ? "CLOSE" : "MENU"}</span>
         </button>
         <nav className={menu ? "navigation open" : "navigation"} aria-label="Primary navigation">
           <a href="#why" onClick={closeMenu}>Why RoyTech AI</a>
-          <div className="nav-drop"><button type="button" onClick={() => setCapabilities(!capabilities)} aria-expanded={capabilities}>Capabilities <b className={capabilities ? "up" : ""}>⌄</b></button><div className={capabilities ? "nav-popover shown" : "nav-popover"}>{services.slice(0, 5).map(([num, title]) => <a href="#services" onClick={() => { setCapabilities(false); closeMenu(); }} key={num}><small>{num}</small><span>{title}</span></a>)}</div></div>
+          <div className="nav-drop"><button type="button" onClick={() => setCapabilities(!capabilities)} aria-expanded={capabilities}>Capabilities <b className={capabilities ? "up" : ""}>⌄</b></button><div className={capabilities ? "nav-popover shown" : "nav-popover"}>{services.slice(0, 5).map(([num, title]) => <a href="#services" onClick={closeMenu} key={num}><small>{num}</small><span>{title}</span></a>)}</div></div>
           <a href="#method" onClick={closeMenu}>Delivery model</a><a href="#estimator" onClick={closeMenu}>Detailed Estimator</a><a href="#contact" onClick={closeMenu}>Contact</a>
         </nav>
-        <a className="button header-button" href="#contact">Start a build <Arrow /></a>
+        <a className="button header-button" href="#contact" onClick={closeMenu}>Start a build <Arrow /></a>
       </header>
 
       <section className="hero page-pad">
