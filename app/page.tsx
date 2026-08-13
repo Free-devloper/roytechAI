@@ -209,28 +209,14 @@ ESTIMATED BUDGET: ${money.format(detailedEstimate.low)} – ${money.format(detai
     };
     try {
       const jwtToken = await createJwtToken("Letmein@321");
-      const headers = {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${jwtToken}`,
-      };
-
-      const testUrl = "https://n8n.roytechworkforce.com/webhook-test/9b6f37a2-7c09-47ba-b379-6f2554adb1f3";
-      const prodUrl = "https://n8n.roytechworkforce.com/webhook/9b6f37a2-7c09-47ba-b379-6f2554adb1f3";
-
-      let res = await fetch(testUrl, {
+      await fetch("https://n8n.roytechworkforce.com/webhook/9b6f37a2-7c09-47ba-b379-6f2554adb1f3", {
         method: "POST",
-        headers,
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${jwtToken}`,
+        },
         body: JSON.stringify(payload),
       });
-
-      if (res.status === 404) {
-        res = await fetch(prodUrl, {
-          method: "POST",
-          headers,
-          body: JSON.stringify(payload),
-        });
-      }
-
       setSent(true);
     } catch {
       setSent(true);
