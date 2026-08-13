@@ -74,6 +74,42 @@ const faqs = [
 ];
 
 const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+
+async function createJwtToken(secret: string): Promise<string> {
+  const base64UrlEncode = (arr: Uint8Array) => {
+    let str = "";
+    for (let i = 0; i < arr.length; i++) {
+      str += String.fromCharCode(arr[i]);
+    }
+    return btoa(str).replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
+  };
+
+  const strToBase64Url = (str: string) => {
+    return base64UrlEncode(new TextEncoder().encode(str));
+  };
+
+  const header = strToBase64Url(JSON.stringify({ alg: "HS256", typ: "JWT" }));
+  const payload = strToBase64Url(JSON.stringify({ iss: "roytech", iat: Math.floor(Date.now() / 1000) }));
+  const dataToSign = `${header}.${payload}`;
+
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+
+  const signatureBuffer = await crypto.subtle.sign(
+    "HMAC",
+    key,
+    new TextEncoder().encode(dataToSign)
+  );
+
+  const signature = base64UrlEncode(new Uint8Array(signatureBuffer));
+  return `${dataToSign}.${signature}`;
+}
+
 const Arrow = () => <span aria-hidden="true">↗</span>;
 
 export default function Home() {
@@ -114,29 +150,28 @@ export default function Home() {
 
   const detailedEstimate = useMemo(() => {
     const scopeData = scopeBases[selectedScope];
-    const aiCost = selectedAiFeatures.reduce((acc, id) => {
-      const item = aiFeatures.find((f) => f.id === id);
-      return acc + (item ? item.cost : 0);
-    }, 0);
-    const fullStackCost = selectedFullStackFeatures.reduce((acc, id) => {
-      const item = fullStackFeatures.find((f) => f.id === id);
-      return acc + (item ? item.cost : 0);
-    }, 0);
+    let aiCost = 0;
+    selectedAiFeatures.forEach((id) => {
+      const feat = aiFeatures.find((f) => f.id === id);
+      if (feat) aiCost += feat.cost;
+    });
+
+    let fsCost = 0;
+    selectedFullStackFeatures.forEach((id) => {
+      const feat = fullStackFeatures.find((f) => f.id === id);
+      if (feat) fsCost += feat.cost;
+    });
 
     const paceObj = deliveryPaces.find((p) => p.key === selectedPace) || deliveryPaces[0];
-    const rawTotal = (scopeData.base + aiCost + fullStackCost) * paceObj.multiplier;
-    
-    const low = Math.round((rawTotal * 0.88) / 500) * 500;
-    const high = Math.round((rawTotal * 1.15) / 500) * 500;
+    const subtotal = scopeData.base + aiCost + fsCost;
+    const totalLow = Math.round(subtotal * paceObj.multiplier);
+    const totalHigh = Math.round(totalLow * 1.22);
 
     return {
-      baseCost: scopeData.base,
-      aiCost,
-      fullStackCost,
-      low,
-      high,
+      low: totalLow,
+      high: totalHigh,
       timeline: scopeData.timeline,
-      multiplier: paceObj.multiplier,
+      desc: scopeData.desc,
     };
   }, [selectedScope, selectedAiFeatures, selectedFullStackFeatures, selectedPace]);
 
@@ -173,17 +208,29 @@ ESTIMATED BUDGET: ${money.format(detailedEstimate.low)} – ${money.format(detai
       timestamp: new Date().toISOString(),
     };
     try {
-      await fetch(
-        "https://n8n.roytechworkforce.com/webhook-test/9b6f37a2-7c09-47ba-b379-6f2554adb1f3",
-        {
+      const jwtToken = await createJwtToken("Letmein@321");
+      const headers = {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${jwtToken}`,
+      };
+
+      const testUrl = "https://n8n.roytechworkforce.com/webhook-test/9b6f37a2-7c09-47ba-b379-6f2554adb1f3";
+      const prodUrl = "https://n8n.roytechworkforce.com/webhook/9b6f37a2-7c09-47ba-b379-6f2554adb1f3";
+
+      let res = await fetch(testUrl, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(payload),
+      });
+
+      if (res.status === 404) {
+        res = await fetch(prodUrl, {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: "Bearer Letmein@321",
-          },
+          headers,
           body: JSON.stringify(payload),
-        }
-      );
+        });
+      }
+
       setSent(true);
     } catch {
       setSent(true);
