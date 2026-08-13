@@ -168,10 +168,26 @@ ESTIMATED BUDGET: ${money.format(detailedEstimate.low)} – ${money.format(detai
     setCapabilities(false);
   };
 
+  const scrollToSection = (e: React.MouseEvent<HTMLAnchorElement>, id: string) => {
+    e.preventDefault();
+    setMenu(false);
+    setCapabilities(false);
+    const element = document.getElementById(id);
+    if (element) {
+      const headerOffset = 85;
+      const elementPosition = element.getBoundingClientRect().top;
+      const offsetPosition = elementPosition + window.scrollY - headerOffset;
+      window.scrollTo({
+        top: offsetPosition,
+        behavior: "smooth",
+      });
+    }
+  };
+
   useEffect(() => {
     const handleScroll = () => {
-      setMenu(false);
-      setCapabilities(false);
+      setMenu((prev) => (prev ? false : prev));
+      setCapabilities((prev) => (prev ? false : prev));
     };
     window.addEventListener("scroll", handleScroll, { passive: true });
     return () => window.removeEventListener("scroll", handleScroll);
@@ -180,21 +196,21 @@ ESTIMATED BUDGET: ${money.format(detailedEstimate.low)} – ${money.format(detai
   return (
     <main id="top">
       <header className="site-header">
-        <a className="brand" href="#top" aria-label="RoyTech AI home" onClick={closeMenu}><span className="mark"><i /><i /><i /></span>RoyTech<sup>AI</sup></a>
+        <a className="brand" href="#top" aria-label="RoyTech AI home" onClick={(e) => scrollToSection(e, "top")}><span className="mark"><i /><i /><i /></span>RoyTech<sup>AI</sup></a>
         <button className={menu ? "menu-button open" : "menu-button"} type="button" onClick={() => setMenu(!menu)} aria-label="Toggle navigation" aria-expanded={menu}>
           <span className="menu-icon"><i /><i /><i /></span>
           <span className="menu-text">{menu ? "CLOSE" : "MENU"}</span>
         </button>
         <nav className={menu ? "navigation open" : "navigation"} aria-label="Primary navigation">
-          <a href="#why" onClick={closeMenu}>Why RoyTech AI</a>
-          <div className="nav-drop"><button type="button" onClick={() => setCapabilities(!capabilities)} aria-expanded={capabilities}>Capabilities <b className={capabilities ? "up" : ""}>⌄</b></button><div className={capabilities ? "nav-popover shown" : "nav-popover"}>{services.slice(0, 5).map(([num, title]) => <a href="#services" onClick={closeMenu} key={num}><small>{num}</small><span>{title}</span></a>)}</div></div>
-          <a href="#method" onClick={closeMenu}>Delivery model</a><a href="#estimator" onClick={closeMenu}>Detailed Estimator</a><a href="/blog" onClick={closeMenu}>Blog</a><a href="#contact" onClick={closeMenu}>Contact</a>
+          <a href="#why" onClick={(e) => scrollToSection(e, "why")}>Why RoyTech AI</a>
+          <div className="nav-drop"><button type="button" onClick={() => setCapabilities(!capabilities)} aria-expanded={capabilities}>Capabilities <b className={capabilities ? "up" : ""}>⌄</b></button><div className={capabilities ? "nav-popover shown" : "nav-popover"}>{services.slice(0, 5).map(([num, title]) => <a href="#services" onClick={(e) => scrollToSection(e, "services")} key={num}><small>{num}</small><span>{title}</span></a>)}</div></div>
+          <a href="#method" onClick={(e) => scrollToSection(e, "method")}>Delivery model</a><a href="#estimator" onClick={(e) => scrollToSection(e, "estimator")}>Detailed Estimator</a><a href="/blog" onClick={closeMenu}>Blog</a><a href="#contact" onClick={(e) => scrollToSection(e, "contact")}>Contact</a>
         </nav>
-        <a className="button header-button" href="#contact" onClick={closeMenu}>Start a build <Arrow /></a>
+        <a className="button header-button" href="#contact" onClick={(e) => scrollToSection(e, "contact")}>Start a build <Arrow /></a>
       </header>
 
       <section className="hero page-pad">
-        <div className="hero-copy"><p className="eyebrow"><i /> AI PRODUCT DEVELOPMENT STUDIO</p><h1>The software your business needs <em>next.</em></h1><p className="lead">We build AI products, focused MVPs, custom software, and delivery systems for founders and teams ready to turn ambitious ideas into operating products.</p><div className="hero-actions"><a className="button" href="#contact">Get a build plan <Arrow /></a><a className="link" href="#services">Explore capabilities <Arrow /></a></div><div className="hero-metrics"><div><b>Weekly</b><span>working demos</span></div><div><b>Senior</b><span>delivery ownership</span></div><div><b>Full</b><span>product handover</span></div></div></div>
+        <div className="hero-copy"><p className="eyebrow"><i /> AI PRODUCT DEVELOPMENT STUDIO</p><h1>The software your business needs <em>next.</em></h1><p className="lead">We build AI products, focused MVPs, custom software, and delivery systems for founders and teams ready to turn ambitious ideas into operating products.</p><div className="hero-actions"><a className="button" href="#contact" onClick={(e) => scrollToSection(e, "contact")}>Get a build plan <Arrow /></a><a className="link" href="#services" onClick={(e) => scrollToSection(e, "services")}>Explore capabilities <Arrow /></a></div><div className="hero-metrics"><div><b>Weekly</b><span>working demos</span></div><div><b>Senior</b><span>delivery ownership</span></div><div><b>Full</b><span>product handover</span></div></div></div>
         <div className="console"><div className="console-head"><span>ROYTECH AI DELIVERY CONSOLE</span><span className="status"><i /> ACTIVE</span></div><div className="brief"><small>AUTHOR & FOUNDER</small><strong>Rehan Ghafoor</strong><span>Remote · global · outcome-led</span></div><div className="console-label">VISIBLE DELIVERY LOOP</div><div className="console-flow"><div><small>01</small><b>Frame</b><span>Scope the useful first release</span></div><div><small>02</small><b>Build</b><span>Ship working software fast</span></div><div><small>03</small><b>Launch</b><span>Make the product operational</span></div></div><div className="console-row"><div><small>PRODUCT</small><b>Decisions stay visible</b></div><div><small>ENGINEERING</small><b>Code you can inherit</b></div></div><div className="pills">{["PYTHON", "LLMS", "NEXT.JS", "FASTAPI", "POSTGRES", "AWS", "AUTOMATION"].map((x) => <span key={x}>{x}</span>)}</div></div>
       </section>
 
