@@ -159,9 +159,37 @@ ESTIMATED BUDGET: ${money.format(detailedEstimate.low)} – ${money.format(detai
     }
   };
 
-  const submit = (event: FormEvent<HTMLFormElement>) => {
+  const [submitting, setSubmitting] = useState(false);
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    setSent(true);
+    setSubmitting(true);
+    const formData = new FormData(event.currentTarget);
+    const payload = {
+      name: formData.get("name") as string,
+      email: formData.get("email") as string,
+      need: formData.get("need") as string,
+      brief: formData.get("brief") as string,
+      timestamp: new Date().toISOString(),
+    };
+    try {
+      await fetch(
+        "https://n8n.roytechworkforce.com/webhook-test/9b6f37a2-7c09-47ba-b379-6f2554adb1f3",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: "Bearer Letmein@321",
+          },
+          body: JSON.stringify(payload),
+        }
+      );
+      setSent(true);
+    } catch {
+      setSent(true);
+    } finally {
+      setSubmitting(false);
+    }
   };
   const closeMenu = () => {
     setMenu(false);
@@ -477,7 +505,7 @@ ESTIMATED BUDGET: ${money.format(detailedEstimate.low)} – ${money.format(detai
                   required
                 />
               </label>
-              <button className="button full" type="submit">Send my build brief <Arrow /></button>
+              <button className="button full" type="submit" disabled={submitting}>{submitting ? "Sending…" : <>Send my build brief <Arrow /></>}</button>
               <small>Use this form as the front end for your lead workflow. Connect it to your inbox or CRM before publishing.</small>
             </>
           )}
