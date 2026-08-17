@@ -131,37 +131,61 @@ export function base64ToBytes(value: string) {
   return bytes;
 }
 
-async function playPcm16(bytes: Uint8Array, sampleRate: number) {
-  const context = new AudioContext();
-  try {
-    const samples = Math.floor(bytes.byteLength / 2);
-    const buffer = context.createBuffer(1, samples, sampleRate);
-    const channel = buffer.getChannelData(0);
-    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-    for (let i = 0; i < samples; i += 1) channel[i] = view.getInt16(i * 2, true) / 32768;
-    await context.resume();
-    await new Promise<void>((resolve) => {
-      const source = context.createBufferSource();
-      source.buffer = buffer;
-      source.connect(context.destination);
-      source.onended = () => resolve();
-      source.start();
-    });
-  } finally {
-    await context.close();
-  }
+async function playPcm16(bytes: Uint8Array, sampleRate: number, onStart?: (durationMs: number) => void) {
+  const context = getPlaybackContext();
+  const samples = Math.floor(bytes.byteLength / 2);
+  const buffer = context.createBuffer(1, samples, sampleRate);
+  const channel = buffer.getChannelData(0);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  for (let i = 0; i < samples; i += 1) channel[i] = view.getInt16(i * 2, true) / 32768;
+  await context.resume();
+  onStart?.((samples / sampleRate) * 1000);
+  await new Promise<void>((resolve) => {
+    const source = context.createBufferSource();
+    source.buffer = buffer;
+    source.connect(context.destination);
+    source.onended = () => resolve();
+    source.start();
+  });
 }
 
-export async function playAudioClip(clip: { mime: string; data: string; rate?: number }) {
+let playbackCtx: AudioContext | null = null;
+
+function getPlaybackContext() {
+  if (playbackCtx && playbackCtx.state !== "closed") return playbackCtx;
+  playbackCtx = new AudioContext();
+  return playbackCtx;
+}
+
+export async function playAudioClip(
+  clip: { mime: string; data: string; rate?: number },
+  onStart?: (durationMs: number) => void,
+) {
   const bytes = base64ToBytes(clip.data);
   if (clip.mime.includes("pcm") && !(bytes[0] === 0x52 && bytes[1] === 0x49)) {
-    await playPcm16(bytes, clip.rate || 24000);
+    await playPcm16(bytes, clip.rate || 24000, onStart);
     return;
   }
   const mime = clip.mime.includes("wav") ? "audio/wav" : clip.mime.includes("pcm") ? "audio/wav" : "audio/mpeg";
   const url = URL.createObjectURL(new Blob([bytes], { type: mime }));
   try {
     const audio = new Audio(url);
+    await new Promise<void>((resolve, reject) => {
+      if (audio.readyState >= 1) {
+        resolve();
+        return;
+      }
+      const timer = window.setTimeout(() => resolve(), 800);
+      audio.onloadedmetadata = () => {
+        window.clearTimeout(timer);
+        resolve();
+      };
+      audio.onerror = () => {
+        window.clearTimeout(timer);
+        reject(new Error("Could not load speech audio."));
+      };
+    });
+    onStart?.((Number.isFinite(audio.duration) ? audio.duration : 0) * 1000);
     await audio.play();
     await new Promise<void>((resolve, reject) => {
       audio.onended = () => resolve();
@@ -172,13 +196,21 @@ export async function playAudioClip(clip: { mime: string; data: string; rate?: n
   }
 }
 
+export type SpeechPlayback = {
+  mime: string;
+  data: string;
+  rate?: number;
+  content?: string;
+};
+
 export class AudioQueue {
-  private queue: Array<{ mime: string; data: string; rate?: number }> = [];
+  private queue: SpeechPlayback[] = [];
   private playing = false;
   private stopped = false;
   onIdle: (() => void) | null = null;
+  onSpeak: ((content: string, durationMs: number) => void) | null = null;
 
-  enqueue(clip: { mime: string; data: string; rate?: number }) {
+  enqueue(clip: SpeechPlayback) {
     if (this.stopped) return;
     this.queue.push(clip);
     void this.pump();
@@ -200,9 +232,11 @@ export class AudioQueue {
       const clip = this.queue.shift();
       if (!clip) break;
       try {
-        await playAudioClip(clip);
+        await playAudioClip(clip, (durationMs) => {
+          if (clip.content) this.onSpeak?.(clip.content, durationMs);
+        });
       } catch {
-        // keep the call going if one clip fails
+        if (clip.content) this.onSpeak?.(clip.content, 0);
       }
     }
     this.playing = false;

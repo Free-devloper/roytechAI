@@ -60,8 +60,8 @@ export async function synthesizeSpeech(input: string): Promise<SpeechClip | null
   const text = speakableText(input);
   if (!text) return null;
   const formats: Array<{ response_format: "mp3" | "pcm"; mime: string; rate?: number }> = [
-    { response_format: "mp3", mime: "audio/mpeg" },
     { response_format: "pcm", mime: "audio/pcm", rate: 24000 },
+    { response_format: "mp3", mime: "audio/mpeg" },
   ];
   let lastError = "Speech synthesis failed.";
   for (const format of formats) {

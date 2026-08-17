@@ -49,13 +49,15 @@ export type SseEvent =
   | { type: "quote"; quote: QuoteResult }
   | { type: "handoff"; sent: boolean; missing?: "name" | "email" | "both" }
   | { type: "transcript"; text: string }
-  | { type: "audio"; mime: string; data: string; rate?: number }
+  | { type: "audio"; mime: string; data: string; rate?: number; content?: string }
   | { type: "hello" }
+  | { type: "hangup" }
   | { type: "done" }
   | { type: "error"; message: string };
 
 export const NAVIGATE_RE = /\[\[NAVIGATE:([^\]]+)\]\]/gi;
 export const HANDOFF_RE = /\[\[HANDOFF\]\]/gi;
+export const END_CALL_RE = /\[\[END_CALL\]\]/gi;
 const SAFETY_RE = /(?:^|\n)\s*(?:user|response)\s*safety\s*:\s*\w+\s*/gi;
 const SAFETY_INLINE_RE = /\b(?:user|response)\s*safety\s*:\s*\w+/gi;
 
@@ -63,6 +65,7 @@ export function sanitizeAssistantText(text: string, streaming = false) {
   let out = text
     .replace(NAVIGATE_RE, "")
     .replace(HANDOFF_RE, "")
+    .replace(END_CALL_RE, "")
     .replace(SAFETY_RE, "\n")
     .replace(SAFETY_INLINE_RE, "");
   if (streaming) {

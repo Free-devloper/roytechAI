@@ -207,6 +207,7 @@ export default function AssistantWidget() {
   const [ready, setReady] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
   const liveRef = useRef(false);
+  const hangupRef = useRef(false);
   const channelRef = useRef<VoiceChannel | null>(null);
   const micRef = useRef<MicCapture | null>(null);
   const audioRef = useRef<AudioQueue | null>(null);
@@ -216,8 +217,10 @@ export default function AssistantWidget() {
 
   const stopLive = async () => {
     liveRef.current = false;
+    hangupRef.current = false;
     setLive(false);
     setVoicePhase("idle");
+    setTouring(false);
     micRef.current?.stop();
     micRef.current = null;
     audioRef.current?.stop();
@@ -487,16 +490,40 @@ export default function AssistantWidget() {
         }),
       );
     };
+    let revealSpeech: ((content: string, durationMs: number) => void) | null = null;
     const attachTurn = (includeUser: boolean) => {
       let rawBuffer = "";
+      let spoken = "";
+      let revealRaf = 0;
       if (includeUser) {
         updateThis((prev) => [...prev, { role: "user", content: "Listening…" }, { role: "assistant", content: "" }]);
       } else {
         updateThis((prev) => [...prev, { role: "assistant", content: "" }]);
       }
+      const revealWithSpeech = (content: string, durationMs: number) => {
+        if (revealRaf) cancelAnimationFrame(revealRaf);
+        const base = spoken;
+        spoken += content;
+        const full = spoken;
+        if (durationMs <= 0) {
+          setLiveText(sanitizeAssistantText(full, true));
+          return;
+        }
+        const started = performance.now();
+        const tick = (now: number) => {
+          const t = Math.min(1, (now - started) / durationMs);
+          const take = Math.max(1, Math.ceil(content.length * t));
+          setLiveText(sanitizeAssistantText(base + content.slice(0, take), true));
+          if (t < 1 && liveRef.current) revealRaf = requestAnimationFrame(tick);
+          else setLiveText(sanitizeAssistantText(full, false));
+        };
+        revealRaf = requestAnimationFrame(tick);
+      };
+      revealSpeech = revealWithSpeech;
       return (event: VoiceEvent) => {
         if (event.type === "session") setVisitorId(event.visitorId);
         if (event.type === "transcript") {
+          if (isSiteTour(event.text)) setTouring(true);
           updateThis((prev) => {
             const next = [...prev];
             for (let i = next.length - 1; i >= 0; i -= 1) {
@@ -510,10 +537,13 @@ export default function AssistantWidget() {
         }
         if (event.type === "token") {
           rawBuffer += event.content;
-          const shown = sanitizeAssistantText(rawBuffer, true);
-          setLiveText(shown);
+          if (!audioRef.current?.busy) {
+            spoken = rawBuffer;
+            setLiveText(sanitizeAssistantText(rawBuffer, true));
+          }
         }
         if (event.type === "audio") {
+          if (event.content) rawBuffer += event.content;
           setVoicePhase("speaking");
           micRef.current?.pause();
           audioRef.current?.enqueue(event);
@@ -528,6 +558,7 @@ export default function AssistantWidget() {
         }
         if (event.type === "quote") updateThis((prev) => patchLastAssistant(prev, { quote: event.quote }));
         if (event.type === "handoff") updateThis((prev) => patchLastAssistant(prev, { handoffSent: event.sent }));
+        if (event.type === "hangup") hangupRef.current = true;
         if (event.type === "error") {
           setError(event.message);
           updateThis((prev) => {
@@ -539,12 +570,13 @@ export default function AssistantWidget() {
           });
         }
         if (event.type === "done") {
-          const finalText = sanitizeAssistantText(rawBuffer, false);
-          if (finalText) {
-            setLiveText(finalText);
-            updateThis((prev) => patchLastAssistant(prev, { content: finalText }));
+          const finalText = sanitizeAssistantText(rawBuffer || spoken, false);
+          if (finalText) updateThis((prev) => patchLastAssistant(prev, { content: finalText }));
+          if (!audioRef.current?.busy) {
+            if (revealRaf) cancelAnimationFrame(revealRaf);
+            setLiveText("");
+            setTouring(false);
           }
-          setLiveText("");
         }
       };
     };
@@ -554,8 +586,15 @@ export default function AssistantWidget() {
       mic.pause();
       micRef.current = mic;
       const audio = new AudioQueue();
+      audio.onSpeak = (content, durationMs) => revealSpeech?.(content, durationMs);
       audio.onIdle = () => {
         if (!liveRef.current) return;
+        setLiveText("");
+        setTouring(false);
+        if (hangupRef.current) {
+          void stopLive();
+          return;
+        }
         setVoicePhase("listening");
         mic.arm();
       };
@@ -575,12 +614,18 @@ export default function AssistantWidget() {
         mic.pause();
         setVoicePhase("thinking");
         setError(null);
+        hangupRef.current = false;
         const spokenHistory = historyForVoice();
         onEvent = attachTurn(true);
         try {
           const bytes = new Uint8Array(await blob.arrayBuffer());
           await channelRef.current.sendUtterance(bytesToBase64(bytes), format, { history: spokenHistory });
-          if (!audio.busy && liveRef.current) {
+          if (!liveRef.current) return;
+          if (hangupRef.current) {
+            if (!audio.busy) await stopLive();
+            return;
+          }
+          if (!audio.busy) {
             setVoicePhase("listening");
             mic.arm();
           }
@@ -634,7 +679,7 @@ export default function AssistantWidget() {
   const historyItems = [...conversations].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 
   return (
-    <div className={`rt-assistant ${open ? "open" : ""} ${panelClosing ? "closing" : ""} ${live ? `live ${voicePhase}` : pending ? (touring ? "touring" : "responding") : ""}`}>
+    <div className={`rt-assistant ${open ? "open" : ""} ${panelClosing ? "closing" : ""} ${live ? `live ${voicePhase}${touring ? " touring" : ""}` : pending ? (touring ? "touring" : "responding") : ""}`}>
       {panelShown && (
         <section className={`rt-assistant-panel ${panelClosing ? "closing" : ""}`} aria-label="RoytechAI Assistant conversation">
           <header className="rt-assistant-head">
@@ -649,13 +694,15 @@ export default function AssistantWidget() {
               {live ? (
                 <span className={`rt-agent-live ${voicePhase === "listening" ? "listen" : "reply"}`}>
                   <i />
-                  {voicePhase === "connecting"
-                    ? "Connecting live call"
-                    : voicePhase === "listening"
-                      ? "Listening"
-                      : voicePhase === "speaking"
-                        ? "Speaking"
-                        : "Thinking"}
+                  {touring
+                    ? "Guiding the tour"
+                    : voicePhase === "connecting"
+                      ? "Connecting live call"
+                      : voicePhase === "listening"
+                        ? "Listening"
+                        : voicePhase === "speaking"
+                          ? "Speaking"
+                          : "Thinking"}
                 </span>
               ) : pending ? (
                 <span className={`rt-agent-live ${touring ? "tour" : "reply"}`}>

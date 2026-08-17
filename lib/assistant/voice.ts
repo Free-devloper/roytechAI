@@ -1,21 +1,11 @@
-import { sendContactBrief } from "./contact-webhook";
-import { persistTurn, persistVisitor } from "./db";
-import { assistantGraph } from "./graph";
 import { corsHeaders, sseLine, visitorFromRequest } from "./http";
-import { streamChat, toOpenRouterMessages } from "./openrouter";
-import { cleanLeadName } from "./prepare";
-import { synthesizeSpeech, takeSentences, transcribeAudio } from "./speech";
-import { HANDOFF_RE, NAVIGATE_RE, sanitizeAssistantText, type ChatTurn, type SseEvent } from "./types";
-import { isSiteTour } from "./tour";
+import { synthesizeSpeech, transcribeAudio } from "./speech";
+import { runAssistantTurn } from "./turn";
+import type { ChatTurn, SseEvent } from "./types";
 
 const MAX_AUDIO_CHARS = 2_000_000;
 const VOICE_GREETING =
-  "You're on a live call with RoytechAI Assistant. Ask about the studio, a quote, or how we deliver.";
-const VOICE_TOUR =
-  "I can walk the site in the chat panel. Stay on this call and ask about a section, a quote, or how we deliver.";
-const VOICE_STYLE = `
-
-The visitor is speaking on a live voice call. Answer in short spoken sentences. Do not use markdown tables, headings, or code fences. Hidden [[NAVIGATE]] and [[HANDOFF]] lines are still allowed.`;
+  "You're on a live call with RoytechAI Assistant. I can walk you through the site, sketch a quote, or pass a brief to the team.";
 
 type VoiceBody = {
   action?: "start" | "utterance";
@@ -26,28 +16,6 @@ type VoiceBody = {
   leadEmail?: string;
   message?: string;
 };
-
-function missingLead(name: string | null, email: string | null): "name" | "email" | "both" | null {
-  const hasName = Boolean(cleanLeadName(name));
-  const hasEmail = Boolean(email);
-  if (!hasName && !hasEmail) return "both";
-  if (!hasName) return "name";
-  if (!hasEmail) return "email";
-  return null;
-}
-
-function hasCorrectLeadAsk(raw: string, missing: "name" | "email" | "both") {
-  const text = raw.toLowerCase();
-  const claimedName = /i have your name/.test(text);
-  if (missing === "both") return /name/.test(text) && /email/.test(text) && !claimedName;
-  if (missing === "name") return /share your name|your name/.test(text) && !claimedName;
-  return /share your email|your email/.test(text) && claimedName;
-}
-
-async function speakAndSend(text: string, send: (event: SseEvent) => void) {
-  const clip = await synthesizeSpeech(text);
-  if (clip) send({ type: "audio", ...clip });
-}
 
 export async function emitVoiceTurn(
   input: {
@@ -66,8 +34,9 @@ export async function emitVoiceTurn(
 
   if (input.greeting) {
     send({ type: "hello" });
-    send({ type: "token", content: VOICE_GREETING });
-    await speakAndSend(VOICE_GREETING, send);
+    const clip = await synthesizeSpeech(VOICE_GREETING);
+    if (clip) send({ type: "audio", content: VOICE_GREETING, ...clip });
+    else send({ type: "token", content: VOICE_GREETING });
     send({ type: "done" });
     return;
   }
@@ -80,102 +49,19 @@ export async function emitVoiceTurn(
   if (!message) throw new Error("I did not catch that. Please try again.");
   send({ type: "transcript", text: message });
 
-  const graph = assistantGraph();
-  const state = await graph.invoke({
-    visitorId: input.visitorId,
-    lastUserMessage: message,
-    clientHistory: input.history ?? [],
-    clientLeadName: input.leadName ?? null,
-    clientLeadEmail: input.leadEmail ?? null,
-  });
-  const systemPrompt = `${state.systemPrompt}${VOICE_STYLE}`;
-
-  if (state.quote) send({ type: "quote", quote: state.quote });
-  if (state.intent !== "tour" && state.navigateTo) send({ type: "navigate", target: state.navigateTo });
-
-  if (state.intent === "tour" || isSiteTour(message)) {
-    send({ type: "token", content: VOICE_TOUR });
-    await speakAndSend(VOICE_TOUR, send);
-    await persistTurn(input.visitorId, { role: "user", content: message });
-    await persistTurn(input.visitorId, { role: "assistant", content: VOICE_TOUR });
-    send({ type: "done" });
-    return;
-  }
-
-  let raw = "";
-  let flushed = "";
-  let speakBuf = "";
-  const llmMessages = toOpenRouterMessages(systemPrompt, state.messages.slice(-12));
-  for await (const token of streamChat(llmMessages)) {
-    raw += token;
-    const visible = sanitizeAssistantText(raw, true);
-    if (visible.length > flushed.length) {
-      const delta = visible.slice(flushed.length);
-      send({ type: "token", content: delta });
-      flushed = visible;
-      speakBuf += delta;
-      const { ready, rest } = takeSentences(speakBuf);
-      speakBuf = rest;
-      for (const sentence of ready) await speakAndSend(sentence, send);
-    }
-  }
-  const finalVisible = sanitizeAssistantText(raw, false);
-  if (finalVisible.length > flushed.length) {
-    send({ type: "token", content: finalVisible.slice(flushed.length) });
-    speakBuf += finalVisible.slice(flushed.length);
-  }
-  if (speakBuf.trim()) await speakAndSend(speakBuf, send);
-
-  const navigateMatch = [...raw.matchAll(NAVIGATE_RE)].pop();
-  if (navigateMatch && !state.navigateTo) send({ type: "navigate", target: navigateMatch[1] });
-
-  const wantsHandoff = state.handoffNeeded || HANDOFF_RE.test(raw);
-  let handoffSent = state.handoffSent;
-  if (wantsHandoff) {
-    const missing = missingLead(state.leadName, state.leadEmail);
-    if (missing) {
-      send({ type: "handoff", sent: false, missing });
-      if (!hasCorrectLeadAsk(raw, missing)) {
-        const ask =
-          missing === "both"
-            ? " I can pass this to a human on the RoyTech AI team. Please share your name and email."
-            : missing === "name"
-              ? " I have your email. Please share your name so the team can follow up."
-              : " I have your name. Please share your email so the team can follow up.";
-        send({ type: "token", content: ask });
-        await speakAndSend(ask, send);
-        raw += ask;
-      }
-    } else if (!handoffSent) {
-      await sendContactBrief({
-        name: state.leadName as string,
-        email: state.leadEmail as string,
-        need: state.compiledNeed,
-        brief: state.compiledBrief,
-        timestamp: new Date().toISOString(),
-        source: "roytechai-assistant-voice",
-      });
-      handoffSent = true;
-      await persistVisitor(input.visitorId, {
-        leadName: cleanLeadName(state.leadName),
-        leadEmail: state.leadEmail,
-        handoffSent: true,
-      });
-      const confirm = " I have sent your brief to the RoyTech AI team. Someone will follow up.";
-      send({ type: "token", content: confirm });
-      send({ type: "handoff", sent: true });
-      await speakAndSend(confirm, send);
-      raw += confirm;
-    } else {
-      send({ type: "handoff", sent: true });
-    }
-  }
-
-  const assistantText = sanitizeAssistantText(raw, false) || "I am here to help with RoyTech AI services, quotes, and site navigation.";
-  await persistTurn(input.visitorId, { role: "user", content: message });
-  await persistTurn(input.visitorId, { role: "assistant", content: assistantText });
-  await persistVisitor(input.visitorId, { leadName: cleanLeadName(state.leadName), leadEmail: state.leadEmail });
-  send({ type: "done" });
+  await runAssistantTurn(
+    {
+      visitorId: input.visitorId,
+      message,
+      history: input.history,
+      leadName: input.leadName,
+      leadEmail: input.leadEmail,
+      source: "roytechai-assistant-voice",
+      allowHangup: true,
+    },
+    send,
+    (text) => synthesizeSpeech(text),
+  );
 }
 
 export async function handleVoiceRequest(request: Request) {
