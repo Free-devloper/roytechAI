@@ -205,6 +205,7 @@ export default function AssistantWidget() {
   const [activeId, setActiveId] = useState<string>("");
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [ready, setReady] = useState(false);
+  const [nudge, setNudge] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
   const liveRef = useRef(false);
   const hangupRef = useRef(false);
@@ -231,12 +232,22 @@ export default function AssistantWidget() {
     channelRef.current = null;
   };
 
+  const dismissNudge = () => {
+    setNudge(false);
+    try {
+      localStorage.setItem("rt_assistant_seen", "1");
+    } catch {
+      // ignore
+    }
+  };
+
   const setPanelOpen = (next: boolean) => {
     if (next) {
       if (closeTimer.current) window.clearTimeout(closeTimer.current);
       setPanelClosing(false);
       setOpen(true);
       setPanelShown(true);
+      dismissNudge();
       return;
     }
     void stopLive();
@@ -268,6 +279,15 @@ export default function AssistantWidget() {
     setActiveId(store.activeId);
     setConversations(store.conversations);
     setReady(true);
+    let seen = false;
+    try {
+      seen = localStorage.getItem("rt_assistant_seen") === "1";
+    } catch {
+      seen = false;
+    }
+    if (seen || store.conversations.some((item) => item.messages.length > 0)) return;
+    const timer = window.setTimeout(() => setNudge(true), 700);
+    return () => window.clearTimeout(timer);
   }, []);
 
   useEffect(() => {
@@ -685,7 +705,7 @@ export default function AssistantWidget() {
   const historyItems = [...conversations].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 
   return (
-    <div className={`rt-assistant ${open ? "open" : ""} ${panelClosing ? "closing" : ""} ${live ? `live ${voicePhase}${touring ? " touring" : ""}` : pending ? (touring ? "touring" : "responding") : ""}`}>
+    <div className={`rt-assistant ${open ? "open" : ""} ${panelClosing ? "closing" : ""} ${nudge && !open ? "nudge" : ""} ${live ? `live ${voicePhase}${touring ? " touring" : ""}` : pending ? (touring ? "touring" : "responding") : ""}`}>
       {panelShown && (
         <section className={`rt-assistant-panel ${panelClosing ? "closing" : ""}`} aria-label="RoytechAI Assistant conversation">
           <header className="rt-assistant-head">
@@ -876,19 +896,27 @@ export default function AssistantWidget() {
           )}
         </section>
       )}
-      <button
-        type="button"
-        className="rt-assistant-fab"
-        onClick={() => setPanelOpen(!open)}
-        aria-expanded={open}
-        aria-label={open ? "Close RoytechAI Assistant" : "Open RoytechAI Assistant"}
-      >
-        <span className="mark" aria-hidden="true">
-          <i />
-          <i />
-          <i />
-        </span>
-      </button>
+      <div className="rt-assistant-dock">
+        {nudge && !open && (
+          <button type="button" className="rt-assistant-hint" onClick={() => setPanelOpen(true)}>
+            <small>ROYTECHAI</small>
+            Need a quote or a tour? Ask me.
+          </button>
+        )}
+        <button
+          type="button"
+          className="rt-assistant-fab"
+          onClick={() => setPanelOpen(!open)}
+          aria-expanded={open}
+          aria-label={open ? "Close RoytechAI Assistant" : "Open RoytechAI Assistant"}
+        >
+          <span className="mark" aria-hidden="true">
+            <i />
+            <i />
+            <i />
+          </span>
+        </button>
+      </div>
     </div>
   );
 }
