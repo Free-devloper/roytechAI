@@ -26,6 +26,8 @@ function loadLocalEnv() {
 
 loadLocalEnv();
 
+export const VISITOR_COOKIE = "rt_vid";
+
 export const DEFAULT_CONTACT_WEBHOOK =
   "https://n8n.roytechworkforce.com/webhook/9b6f37a2-7c09-47ba-b379-6f2554adb1f3";
 
