@@ -1,6 +1,6 @@
 import { Annotation, END, START, StateGraph } from "@langchain/langgraph";
 import { loadHistory, loadVisitor } from "./db";
-import { extractEmail, extractName, cleanLeadName, detectIntent, detectNavigate, mapNeed, retrieveChunks, compileBrief, buildSystemPrompt } from "./prepare";
+import { extractSpokenEmail, extractEmail, extractLeadsFromMessages, cleanLeadName, detectIntent, detectNavigate, mapNeed, retrieveChunks, compileBrief, buildSystemPrompt, historyShowsHandoffSent } from "./prepare";
 import { buildQuote } from "./pricing";
 import type { ChatTurn, Intent, QuoteResult, RetrievedChunk } from "./types";
 
@@ -39,11 +39,12 @@ async function loadHistoryNode(state: GraphState) {
   }));
   const base = state.clientHistory.length > 0 ? state.clientHistory : stored;
   const messages = base.concat({ role: "user", content: state.lastUserMessage });
+  const leads = extractLeadsFromMessages(messages);
   return {
     messages,
-    leadName: cleanLeadName(extractName(state.lastUserMessage, messages) || state.clientLeadName || visitor.leadName),
-    leadEmail: extractEmail(state.lastUserMessage) || state.clientLeadEmail || visitor.leadEmail,
-    handoffSent: visitor.handoffSent,
+    leadName: cleanLeadName(leads.leadName || state.clientLeadName || visitor.leadName),
+    leadEmail: leads.leadEmail || extractSpokenEmail(state.lastUserMessage) || extractEmail(state.lastUserMessage) || state.clientLeadEmail || visitor.leadEmail,
+    handoffSent: visitor.handoffSent || historyShowsHandoffSent(messages),
   };
 }
 

@@ -59,6 +59,7 @@ export const NAVIGATE_RE = /\[\[NAVIGATE:([^\]]+)\]\]/gi;
 export const NAVIGATE_CALL_RE = /\[NAVIGATE\(\s*['"]([^'"]+)['"]\s*\)\]/gi;
 export const NAVIGATE_BARE_RE = /\bNAVIGATE\(\s*['"]([^'"]+)['"]\s*\)/gi;
 export const HANDOFF_RE = /\[\[HANDOFF\]\]/gi;
+export const HANDOFF_CALL_RE = /\[HANDOFF\(\s*\)\]|\bHANDOFF\(\s*\)/gi;
 export const END_CALL_RE = /\[\[END_CALL\]\]/gi;
 const TOOL_WRAP_RE = /<\|[^|>]*\|>/g;
 const SAFETY_RE = /(?:^|\n)\s*(?:user|response)\s*safety\s*:\s*\w+\s*/gi;
@@ -91,6 +92,7 @@ export function sanitizeAssistantText(text: string, streaming = false) {
     .replace(NAVIGATE_CALL_RE, "")
     .replace(NAVIGATE_BARE_RE, "")
     .replace(HANDOFF_RE, "")
+    .replace(HANDOFF_CALL_RE, "")
     .replace(END_CALL_RE, "")
     .replace(TOOL_WRAP_RE, "")
     .replace(SAFETY_RE, "\n")

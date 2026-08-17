@@ -13,10 +13,27 @@ const NAME_STOP = new Set([
   "thanks", "the", "this", "tour", "what", "who", "why", "yes",
 ]);
 const ASKED_FOR_NAME_RE =
-  /(?:share|send|leave)\s+your\s+name|what(?:'s| is)\s+your\s+name|name and email|your name so the team/i;
+  /(?:share|send|leave)\s+your\s+name|what(?:'s| is)\s+your\s+name|name and email|your name so the team|please share your name|your email so the team/i;
 
 export function extractEmail(text: string) {
-  return text.match(EMAIL_RE)?.[0] ?? null;
+  return text.match(EMAIL_RE)?.[0]?.toLowerCase() ?? null;
+}
+
+export function extractSpokenEmail(text: string) {
+  const direct = extractEmail(text);
+  if (direct) return direct;
+  const normalized = text
+    .replace(/\b(?:dot|period)\b/gi, ".")
+    .replace(/\b(?:at the|at)\b/gi, "@")
+    .replace(/\s*([.@])\s*/g, "$1");
+  return extractEmail(normalized) || extractEmail(normalized.replace(/\s+/g, ""));
+}
+
+export function titleCaseName(value: string) {
+  return value
+    .split(/\s+/)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(" ");
 }
 
 export function isPlausibleName(value: string | null | undefined): value is string {
@@ -36,32 +53,62 @@ export function cleanLeadName(value: string | null | undefined) {
 
 export function extractName(text: string, history: ChatTurn[]) {
   const patterns = [
-    /(?:my name is|i am|i'm|this is)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2})/i,
-    /^name:\s*([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2})/im,
+    /(?:my name is|name is|i am|i'm|this is)\s+([A-Za-z][a-zA-Z]+(?:\s+[A-Za-z][a-zA-Z]+){0,2})/i,
+    /^name:\s*([A-Za-z][a-zA-Z]+(?:\s+[A-Za-z][a-zA-Z]+){0,2})/im,
   ];
   for (const pattern of patterns) {
     const match = text.match(pattern);
     const candidate = match?.[1]?.trim();
-    if (candidate && !EMAIL_RE.test(candidate) && isPlausibleName(candidate)) return candidate;
+    if (candidate && !EMAIL_RE.test(candidate) && isPlausibleName(candidate)) return titleCaseName(candidate);
   }
   const lastAssistant = [...history].reverse().find((turn) => turn.role === "assistant");
   if (lastAssistant && ASKED_FOR_NAME_RE.test(lastAssistant.content)) {
-    const compact = text.replace(EMAIL_RE, "").replace(/[,.]/g, " ").trim();
-    const words = compact.split(/\s+/).filter((word) => /^[A-Za-z][A-Za-z'-]+$/.test(word));
+    const compact = extractSpokenEmail(text)
+      ? text.replace(EMAIL_RE, "").replace(/\b\S+@\S+\b/g, "").replace(/[,.]/g, " ").trim()
+      : text.replace(/[,.]/g, " ").trim();
+    const words = compact.split(/\s+/).filter((word) => /^[A-Za-z][A-Za-z'-]+$/.test(word) && !NAME_STOP.has(word.toLowerCase()));
     const candidate = words.join(" ");
-    if (words.length >= 1 && words.length <= 3 && compact.length < 40 && isPlausibleName(candidate)) {
-      return candidate;
+    if (words.length >= 1 && words.length <= 3 && compact.length < 80 && isPlausibleName(candidate)) {
+      return titleCaseName(candidate);
     }
   }
   return null;
 }
 
+export function extractLeadsFromMessages(messages: ChatTurn[]) {
+  let leadName: string | null = null;
+  let leadEmail: string | null = null;
+  for (let index = 0; index < messages.length; index += 1) {
+    const turn = messages[index];
+    if (turn.role !== "user") continue;
+    const slice = messages.slice(0, index + 1);
+    leadName = extractName(turn.content, slice) || leadName;
+    leadEmail = extractSpokenEmail(turn.content) || leadEmail;
+  }
+  return {
+    leadName: leadName ? titleCaseName(leadName) : null,
+    leadEmail,
+  };
+}
+
+export function historyHasLeadAsk(history: ChatTurn[]) {
+  return history.some(
+    (turn) =>
+      turn.role === "assistant" &&
+      (ASKED_FOR_NAME_RE.test(turn.content) || /share your email|so the team can follow up|pass this to a human/i.test(turn.content)),
+  );
+}
+
+export function historyShowsHandoffSent(history: ChatTurn[]) {
+  return history.some(
+    (turn) => turn.role === "assistant" && /sent your brief to the RoyTech AI team/i.test(turn.content),
+  );
+}
+
 export function detectIntent(text: string, history: ChatTurn[], hasLead: boolean): Intent {
   const t = text.toLowerCase();
-  const waitingForLead = history.slice(-2).some(
-    (turn) => turn.role === "assistant" && /name|email/i.test(turn.content) && /follow up|handoff|team|human|brief/i.test(turn.content),
-  );
-  if (waitingForLead && (extractEmail(text) || extractName(text, history) || hasLead)) return "handoff";
+  const waitingForLead = historyHasLeadAsk(history.slice(-6));
+  if (waitingForLead && (extractSpokenEmail(text) || extractName(text, history) || hasLead)) return "handoff";
   if (isSiteTour(text)) return "tour";
   if (isTourAdvance(text)) {
     const lastAssistant = [...history].reverse().find((turn) => turn.role === "assistant");
@@ -181,8 +228,9 @@ export async function hydrateState(input: {
     role: "user",
     content: input.message,
   });
-  const leadEmail = extractEmail(input.message) || input.leadEmail || visitor.leadEmail;
-  const leadName = cleanLeadName(extractName(input.message, messages) || input.leadName || visitor.leadName);
+  const leads = extractLeadsFromMessages(messages);
+  const leadEmail = leads.leadEmail || extractSpokenEmail(input.message) || extractEmail(input.message) || input.leadEmail || visitor.leadEmail;
+  const leadName = cleanLeadName(leads.leadName || input.leadName || visitor.leadName);
   const intent = detectIntent(input.message, messages, Boolean(leadName && leadEmail));
   const navigateTo = intent === "navigate" ? detectNavigate(input.message) : null;
   const quote = intent === "quote" || /quote|estimate|price|cost/.test(input.message.toLowerCase())
@@ -206,7 +254,7 @@ export async function hydrateState(input: {
     navigateTo,
     leadName,
     leadEmail,
-    handoffSent: visitor.handoffSent,
+    handoffSent: visitor.handoffSent || historyShowsHandoffSent(messages),
     handoffNeeded: intent === "handoff",
     systemPrompt: "",
     compiledNeed: mapNeed(input.message + " " + messages.map((m) => m.content).join(" ")),

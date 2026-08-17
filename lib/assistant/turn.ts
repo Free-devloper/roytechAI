@@ -2,10 +2,21 @@ import { sendContactBrief } from "./contact-webhook";
 import { persistTurn, persistVisitor } from "./db";
 import { assistantGraph } from "./graph";
 import { streamChat, toOpenRouterMessages } from "./openrouter";
-import { cleanLeadName } from "./prepare";
+import { cleanLeadName, historyHasLeadAsk, historyShowsHandoffSent } from "./prepare";
 import { takeSentences, type SpeechClip } from "./speech";
-import { END_CALL_RE, HANDOFF_RE, extractNavigateTargets, sanitizeAssistantText, type ChatTurn, type SseEvent } from "./types";
+import {
+  HANDOFF_CALL_RE,
+  HANDOFF_RE,
+  extractNavigateTargets,
+  sanitizeAssistantText,
+  type ChatTurn,
+  type Intent,
+  type SseEvent,
+} from "./types";
 import { TOUR_CLOSE, TOUR_INTRO, TOUR_STOPS, isSiteTour, isTourAdvance, lastTourStopIndex, tourStepMarkdown } from "./tour";
+
+const CLOSE_OFFER = " Would you like me to end the call, or is there something else I can help with?";
+const CLOSE_OFFER_RE = /would you like me to end the call/i;
 
 const LIVE_CALL_RULES = `
 
@@ -13,8 +24,14 @@ You are on a live voice call. You have the same capabilities as the on-site text
 - If they ask to tour the site, or say next during a tour, the product plays the remaining stops. Do not walk the tour yourself and do not wait for "next".
 - Never emit tool-call markup such as <|tool_call_start|>, NAVIGATE('...'), or function calls. The only hidden controls are [[NAVIGATE:/#services]], [[HANDOFF]], and [[END_CALL]].
 - If they want the contact form, put [[NAVIGATE:/#contact]] and collect any missing name and email, then [[HANDOFF]].
-- When the visitor is finished — goodbye, hang up, end the call, or they confirm they do not need more after a brief is sent — say a short closing line, then put [[END_CALL]] alone on the last line. That ends the live call the same way the End button does.
+- After the current request is finished — quote given, section shown, brief sent, or question answered — do not hang up yet. Ask once whether they want to end the call or need something else. Do not emit [[END_CALL]] until they confirm they are done.
+- If they confirm they are finished — goodbye, hang up, that's all, or yes after you asked to end — say a short closing line, then put [[END_CALL]] alone on the last line.
 - Do not end the call while you are still collecting a name, email, or project brief.`;
+
+function hasToken(pattern: RegExp, text: string) {
+  pattern.lastIndex = 0;
+  return pattern.test(text);
+}
 
 function missingLead(name: string | null, email: string | null): "name" | "email" | "both" | null {
   const hasName = Boolean(cleanLeadName(name));
@@ -37,8 +54,38 @@ function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function lastOfferedClose(history: ChatTurn[]) {
+  const last = [...history].reverse().find((turn) => turn.role === "assistant");
+  return Boolean(last && CLOSE_OFFER_RE.test(last.content));
+}
+
+function isCloseConfirm(text: string) {
+  const trimmed = text.trim();
+  return (
+    isHangupRequest(trimmed) ||
+    /^(yes|yeah|yep|sure|please|ok|okay)\b/i.test(trimmed) ||
+    /\b(yes please|please do|go ahead|that'?s (it|all)|nothing else|i(?:'m| am) good|we(?:'re| are) done|end it)\b/i.test(
+      trimmed,
+    )
+  );
+}
+
+function isCloseDecline(text: string) {
+  return /\b(no|nope|not yet|don'?t(?: you)? (?:end|hang)|wait|hold on|something else|another (question|thing)|keep going)\b/i.test(
+    text,
+  );
+}
+
+function isNewWorkIntent(intent: Intent) {
+  return intent === "quote" || intent === "tour" || intent === "navigate" || intent === "handoff";
+}
+
+function assistantStillCollecting(raw: string) {
+  return /(?:share|send|leave|what(?:'s| is))\s+your\s+(?:name|email)|name and email|so the team can follow up/i.test(raw);
+}
+
 export function isHangupRequest(text: string) {
-  return /\b(good\s?bye|bye now|hang up|end (the )?(call|conversation|chat)|that'?s all for now|i(?:'m| am) done)\b/i.test(
+  return /\b(good\s?bye|bye now|hang up|end (the )?(call|conversation|chat)|that'?s all(?: for now)?|nothing else|i(?:'m| am) done)\b/i.test(
     text,
   );
 }
@@ -66,6 +113,13 @@ export async function runAssistantTurn(
     clientLeadEmail: input.leadEmail ?? null,
   });
   const systemPrompt = input.allowHangup ? `${state.systemPrompt}${LIVE_CALL_RULES}` : state.systemPrompt;
+  let handoffSent = state.handoffSent || historyShowsHandoffSent(state.messages);
+  let raw = "";
+
+  await persistVisitor(input.visitorId, {
+    leadName: cleanLeadName(state.leadName),
+    leadEmail: state.leadEmail,
+  });
 
   if (state.quote) send({ type: "quote", quote: state.quote });
   if (state.intent !== "tour" && state.navigateTo) send({ type: "navigate", target: state.navigateTo });
@@ -90,6 +144,70 @@ export async function runAssistantTurn(
     });
     return waitFor ? speakTail : Promise.resolve();
   };
+
+  const shouldSubmitLeads = (spoken = raw) => {
+    if (missingLead(state.leadName, state.leadEmail) || handoffSent) return false;
+    return (
+      state.handoffNeeded ||
+      hasToken(HANDOFF_RE, spoken) ||
+      hasToken(HANDOFF_CALL_RE, spoken) ||
+      historyHasLeadAsk(state.messages) ||
+      /(talk to (a )?human|contact (the )?team|hire|start a build)/i.test(message)
+    );
+  };
+
+  const submitHandoffIfReady = async () => {
+    if (!shouldSubmitLeads()) return false;
+    try {
+      await sendContactBrief({
+        name: state.leadName as string,
+        email: state.leadEmail as string,
+        need: state.compiledNeed,
+        brief: state.compiledBrief,
+        timestamp: new Date().toISOString(),
+        source: input.source ?? "roytechai-assistant",
+      });
+      handoffSent = true;
+      await persistVisitor(input.visitorId, {
+        leadName: cleanLeadName(state.leadName),
+        leadEmail: state.leadEmail,
+        handoffSent: true,
+      });
+      const confirm = "\n\nI have sent your brief to the RoyTech AI team. Someone will follow up.";
+      send({ type: "handoff", sent: true });
+      await emitSpoken(confirm);
+      raw += confirm;
+      return true;
+    } catch (err) {
+      console.error("Contact webhook failed", err);
+      const fail =
+        "\n\nI have your name and email, but I could not send the brief just now. You can also use the contact form on the site.";
+      send({ type: "handoff", sent: false });
+      await emitSpoken(fail);
+      raw += fail;
+      return false;
+    }
+  };
+
+  const userConfirmedHangup = Boolean(
+    input.allowHangup &&
+      (isHangupRequest(message) ||
+        (lastOfferedClose(state.messages) && isCloseConfirm(message) && !isCloseDecline(message) && !isNewWorkIntent(state.intent))),
+  );
+
+  if (userConfirmedHangup) {
+    await submitHandoffIfReady();
+    const closing = " Thanks for calling. I'll end the live conversation now.";
+    await emitSpoken(closing);
+    raw += closing;
+    const assistantText = sanitizeAssistantText(raw, false) || closing.trim();
+    await persistTurn(input.visitorId, { role: "user", content: message });
+    await persistTurn(input.visitorId, { role: "assistant", content: assistantText });
+    await persistVisitor(input.visitorId, { leadName: cleanLeadName(state.leadName), leadEmail: state.leadEmail });
+    send({ type: "hangup" });
+    send({ type: "done" });
+    return;
+  }
 
   const continueTour = isTourAdvance(message) && lastTourStopIndex(state.messages) >= 0;
   const playTour = state.intent === "tour" || isSiteTour(message) || continueTour;
@@ -117,6 +235,10 @@ export async function runAssistantTurn(
       spoken += TOUR_CLOSE;
       await emitSpoken(TOUR_CLOSE);
     }
+    if (input.allowHangup && !CLOSE_OFFER_RE.test(spoken)) {
+      spoken += CLOSE_OFFER;
+      await emitSpoken(CLOSE_OFFER);
+    }
     await persistTurn(input.visitorId, { role: "user", content: message });
     await persistTurn(input.visitorId, { role: "assistant", content: spoken });
     await persistVisitor(input.visitorId, { leadName: cleanLeadName(state.leadName), leadEmail: state.leadEmail });
@@ -124,7 +246,6 @@ export async function runAssistantTurn(
     return;
   }
 
-  let raw = "";
   let flushed = "";
   let speakBuf = "";
   const llmMessages = toOpenRouterMessages(systemPrompt, state.messages.slice(-12));
@@ -157,9 +278,13 @@ export async function runAssistantTurn(
   const navigateMatch = extractNavigateTargets(raw).pop();
   if (navigateMatch && !state.navigateTo) send({ type: "navigate", target: navigateMatch });
 
-  const wantsHandoff = state.handoffNeeded || HANDOFF_RE.test(raw);
-  let handoffSent = state.handoffSent;
-  if (wantsHandoff) {
+  const wantsHandoff =
+    state.handoffNeeded ||
+    hasToken(HANDOFF_RE, raw) ||
+    hasToken(HANDOFF_CALL_RE, raw) ||
+    historyHasLeadAsk(state.messages);
+  const justSentHandoff = await submitHandoffIfReady();
+  if (wantsHandoff && !justSentHandoff && !handoffSent) {
     const missing = missingLead(state.leadName, state.leadEmail);
     if (missing) {
       send({ type: "handoff", sent: false, missing });
@@ -173,39 +298,27 @@ export async function runAssistantTurn(
         await emitSpoken(ask);
         raw += ask;
       }
-    } else if (!handoffSent) {
-      await sendContactBrief({
-        name: state.leadName as string,
-        email: state.leadEmail as string,
-        need: state.compiledNeed,
-        brief: state.compiledBrief,
-        timestamp: new Date().toISOString(),
-        source: input.source ?? "roytechai-assistant",
-      });
-      handoffSent = true;
-      await persistVisitor(input.visitorId, {
-        leadName: cleanLeadName(state.leadName),
-        leadEmail: state.leadEmail,
-        handoffSent: true,
-      });
-      const confirm = "\n\nI have sent your brief to the RoyTech AI team. Someone will follow up.";
-      send({ type: "handoff", sent: true });
-      await emitSpoken(confirm);
-      raw += confirm;
     } else {
       send({ type: "handoff", sent: true });
     }
+  } else if (handoffSent && wantsHandoff && !justSentHandoff) {
+    send({ type: "handoff", sent: true });
   }
 
-  const userWantsHangup = Boolean(input.allowHangup && isHangupRequest(message));
-  const modelWantsHangup = Boolean(input.allowHangup && END_CALL_RE.test(raw));
-  if (userWantsHangup && !modelWantsHangup) {
-    const closing = " Thanks for calling. I'll end the live conversation now.";
-    await emitSpoken(closing);
-    raw += closing;
-  }
-  if (input.allowHangup && (modelWantsHangup || userWantsHangup)) {
-    send({ type: "hangup" });
+  const intentDone =
+    Boolean(state.quote) ||
+    justSentHandoff ||
+    state.intent === "navigate" ||
+    (state.intent === "handoff" && handoffSent && !assistantStillCollecting(raw)) ||
+    (state.intent === "qa" && !assistantStillCollecting(raw) && !/\?\s*$/.test(sanitizeAssistantText(raw, false).trim()));
+  if (
+    input.allowHangup &&
+    intentDone &&
+    !assistantStillCollecting(raw) &&
+    !CLOSE_OFFER_RE.test(raw)
+  ) {
+    await emitSpoken(CLOSE_OFFER);
+    raw += CLOSE_OFFER;
   }
 
   const assistantText =
