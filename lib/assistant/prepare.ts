@@ -104,8 +104,9 @@ Rules:
 - When a human should take over, put [[HANDOFF]] alone on the last line. Then politely ask only for name and email if they are missing. Do not re-ask the project story if it is already in the thread.
 - If a brief was already sent, confirm that and do not pretend to email from a personal inbox.
 - Keep replies concise, professional, and specific. Write only visitor-facing prose besides those hidden control lines.
-- Format in Markdown: **bold** for roles, phases, and key terms; ## or ### headings for sections; numbered lists for sequential steps; bullets for options.
-- When comparing options, stacks, phases, or price bands, use a GitHub-flavored markdown table with a header row. Never use HTML tags.
+- Format in Markdown: **bold** for roles, phases, and key terms; ### headings for section labels such as "Key steps".
+- Write sequential steps as one numbered list, each item on its own line: 1. **Title** – detail. Do not put each step in its own paragraph.
+- When comparing options, stacks, phases, or price bands, use a GitHub-flavored markdown table with a header row and a separator row of dashes. Never use HTML tags.
 
 ${quote}
 Knowledge:

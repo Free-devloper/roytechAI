@@ -7,6 +7,10 @@ type Props = {
   text: string;
 };
 
+const BOLD_LEAD = /^(?:\d+[.)]\s+)?\*\*[^*\n]+\*\*/;
+const STEP_LABEL =
+  /^(?:#{1,6}\s*)?(key steps|steps|how we (?:work|deliver)|our process|delivery (?:model|process)|the process)\s*:?\s*$/i;
+
 function safeHref(href: string) {
   const value = href.trim();
   if (!value) return null;
@@ -18,6 +22,54 @@ function safeHref(href: string) {
     return null;
   }
   return null;
+}
+
+export function normalizeAssistantMarkdown(source: string) {
+  const lines = source.replace(/\r\n/g, "\n").replace(/[\u2217\uFF0A\u204E]/g, "*").split("\n");
+  const out: string[] = [];
+  let index = 0;
+
+  const peekNextContent = (from: number) => {
+    let next = from;
+    while (next < lines.length && !lines[next].trim()) next += 1;
+    return next;
+  };
+
+  while (index < lines.length) {
+    const trimmed = lines[index].trim();
+    if (STEP_LABEL.test(trimmed)) {
+      out.push(`### ${trimmed.replace(/^#{1,6}\s*/, "").replace(/:$/, "")}`);
+      index = peekNextContent(index + 1);
+      continue;
+    }
+    if (BOLD_LEAD.test(trimmed)) {
+      const items: string[] = [];
+      while (index < lines.length) {
+        const current = lines[index].trim();
+        if (!current) {
+          const next = peekNextContent(index + 1);
+          if (next < lines.length && BOLD_LEAD.test(lines[next].trim())) {
+            index = next;
+            continue;
+          }
+          break;
+        }
+        if (!BOLD_LEAD.test(current)) break;
+        items.push(current.replace(/^\d+[.)]\s+/, ""));
+        index += 1;
+      }
+      if (items.length >= 2) {
+        out.push(items.map((item, itemIndex) => `${itemIndex + 1}. ${item}`).join("\n"));
+        continue;
+      }
+      out.push(items[0] ?? trimmed);
+      continue;
+    }
+    out.push(lines[index]);
+    index += 1;
+  }
+
+  return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
 function Inline({ tokens }: { tokens?: Token[] }) {
@@ -58,9 +110,7 @@ function InlineToken({ token }: { token: Token }) {
     case "link": {
       const link = token as Tokens.Link;
       const href = safeHref(link.href);
-      if (!href) {
-        return <Inline tokens={link.tokens} />;
-      }
+      if (!href) return <Inline tokens={link.tokens} />;
       return (
         <a href={href} target={href.startsWith("http") ? "_blank" : undefined} rel="noreferrer">
           <Inline tokens={link.tokens} />
@@ -75,9 +125,9 @@ function InlineToken({ token }: { token: Token }) {
 }
 
 function ListBody({ tokens }: { tokens: Token[] }) {
-  const onlyParagraph = tokens.length === 1 && tokens[0].type === "paragraph";
-  if (onlyParagraph) {
-    return <Inline tokens={(tokens[0] as Tokens.Paragraph).tokens} />;
+  if (tokens.length === 1 && (tokens[0].type === "paragraph" || tokens[0].type === "text")) {
+    const inner = tokens[0] as Tokens.Paragraph | Tokens.Text;
+    return <Inline tokens={inner.tokens} />;
   }
   return <Blocks tokens={tokens} />;
 }
@@ -116,11 +166,14 @@ function Block({ token }: { token: Token }): ReactNode {
     case "space":
       return null;
     case "paragraph":
+    case "text": {
+      const block = token as Tokens.Paragraph | Tokens.Text;
       return (
         <p>
-          <Inline tokens={(token as Tokens.Paragraph).tokens} />
+          <Inline tokens={block.tokens} />
         </p>
       );
+    }
     case "heading": {
       const heading = token as Tokens.Heading;
       const Tag = (`h${Math.min(heading.depth, 4)}` as "h1" | "h2" | "h3" | "h4");
@@ -168,11 +221,7 @@ function Block({ token }: { token: Token }): ReactNode {
     case "def":
       return null;
     default:
-      return "text" in token ? (
-        <p>
-          {String((token as { text?: string }).text ?? "")}
-        </p>
-      ) : null;
+      return null;
   }
 }
 
@@ -182,15 +231,17 @@ function Blocks({ tokens }: { tokens: Token[] }) {
 
 export default function AssistantMarkdown({ text }: Props) {
   const tokens = useMemo(() => {
+    const source = normalizeAssistantMarkdown(text);
+    if (!source) return null;
     try {
-      return lexer(text, { gfm: true, breaks: true });
+      return lexer(source, { gfm: true, breaks: true });
     } catch {
       return null;
     }
   }, [text]);
 
   if (!text.trim()) return null;
-  if (!tokens) return <p>{text}</p>;
+  if (!tokens) return <p>{normalizeAssistantMarkdown(text)}</p>;
   return (
     <div className="rt-md">
       <Blocks tokens={tokens} />
