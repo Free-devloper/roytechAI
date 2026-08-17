@@ -75,41 +75,6 @@ const faqs = [
 
 const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 
-async function createJwtToken(secret: string): Promise<string> {
-  const base64UrlEncode = (arr: Uint8Array) => {
-    let str = "";
-    for (let i = 0; i < arr.length; i++) {
-      str += String.fromCharCode(arr[i]);
-    }
-    return btoa(str).replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
-  };
-
-  const strToBase64Url = (str: string) => {
-    return base64UrlEncode(new TextEncoder().encode(str));
-  };
-
-  const header = strToBase64Url(JSON.stringify({ alg: "HS256", typ: "JWT" }));
-  const payload = strToBase64Url(JSON.stringify({ iss: "roytech", iat: Math.floor(Date.now() / 1000) }));
-  const dataToSign = `${header}.${payload}`;
-
-  const key = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"]
-  );
-
-  const signatureBuffer = await crypto.subtle.sign(
-    "HMAC",
-    key,
-    new TextEncoder().encode(dataToSign)
-  );
-
-  const signature = base64UrlEncode(new Uint8Array(signatureBuffer));
-  return `${dataToSign}.${signature}`;
-}
-
 const Arrow = () => <span aria-hidden="true">↗</span>;
 
 export default function Home() {
@@ -172,6 +137,10 @@ export default function Home() {
       high: totalHigh,
       timeline: scopeData.timeline,
       desc: scopeData.desc,
+      baseCost: scopeData.base,
+      aiCost,
+      fullStackCost: fsCost,
+      multiplier: paceObj.multiplier,
     };
   }, [selectedScope, selectedAiFeatures, selectedFullStackFeatures, selectedPace]);
 
@@ -208,13 +177,9 @@ ESTIMATED BUDGET: ${money.format(detailedEstimate.low)} – ${money.format(detai
       timestamp: new Date().toISOString(),
     };
     try {
-      const jwtToken = await createJwtToken("Letmein@321");
-      await fetch("https://n8n.roytechworkforce.com/webhook/9b6f37a2-7c09-47ba-b379-6f2554adb1f3", {
+      await fetch("/api/contact", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${jwtToken}`,
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
       setSent(true);
@@ -250,8 +215,18 @@ ESTIMATED BUDGET: ${money.format(detailedEstimate.low)} – ${money.format(detai
       setMenu((prev) => (prev ? false : prev));
       setCapabilities((prev) => (prev ? false : prev));
     };
+    const applyBrief = (event: Event) => {
+      const detail = (event as CustomEvent<string>).detail;
+      if (typeof detail === "string" && detail.trim()) {
+        setBriefText((prev) => (prev ? `${prev}\n\n${detail}` : detail));
+      }
+    };
     window.addEventListener("scroll", handleScroll, { passive: true });
-    return () => window.removeEventListener("scroll", handleScroll);
+    window.addEventListener("roytech-apply-brief", applyBrief);
+    return () => {
+      window.removeEventListener("scroll", handleScroll);
+      window.removeEventListener("roytech-apply-brief", applyBrief);
+    };
   }, []);
 
   return (

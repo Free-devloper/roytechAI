@@ -3,7 +3,17 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist/client",
   "rewrites": [
+    { "source": "/api/assistant/chat", "destination": "/api/assistant" },
     { "source": "/blog", "destination": "/blog/index.html" },
-    { "source": "/((?!assets/|robots.txt|sitemap.xml).*)", "destination": "/index.html" }
-  ]
+    { "source": "/((?!api/|assets/|robots.txt|sitemap.xml).*)", "destination": "/index.html" }
+  ],
+  "functions": {
+    "api/assistant.ts": {
+      "includeFiles": "{data/**,knowledge/**,node_modules/sql.js/dist/**}",
+      "maxDuration": 60
+    },
+    "api/contact.ts": {
+      "maxDuration": 15
+    }
+  }
 }
