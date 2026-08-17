@@ -4,13 +4,14 @@ import { assistantGraph } from "./graph";
 import { streamChat, toOpenRouterMessages } from "./openrouter";
 import { cleanLeadName } from "./prepare";
 import { takeSentences, type SpeechClip } from "./speech";
-import { END_CALL_RE, HANDOFF_RE, NAVIGATE_RE, sanitizeAssistantText, type ChatTurn, type SseEvent } from "./types";
-import { TOUR_CLOSE, TOUR_INTRO, TOUR_STOPS, isSiteTour, tourStepMarkdown } from "./tour";
+import { END_CALL_RE, HANDOFF_RE, extractNavigateTargets, sanitizeAssistantText, type ChatTurn, type SseEvent } from "./types";
+import { TOUR_CLOSE, TOUR_INTRO, TOUR_STOPS, isSiteTour, isTourAdvance, lastTourStopIndex, tourStepMarkdown } from "./tour";
 
 const LIVE_CALL_RULES = `
 
 You are on a live voice call. You have the same capabilities as the on-site text assistant: site tour, section navigation, indicative quotes, and human handoff through the contact brief.
-- If they ask to tour the site, the product plays the tour. Do not dump every section in one reply.
+- If they ask to tour the site, or say next during a tour, the product plays the remaining stops. Do not walk the tour yourself and do not wait for "next".
+- Never emit tool-call markup such as <|tool_call_start|>, NAVIGATE('...'), or function calls. The only hidden controls are [[NAVIGATE:/#services]], [[HANDOFF]], and [[END_CALL]].
 - If they want the contact form, put [[NAVIGATE:/#contact]] and collect any missing name and email, then [[HANDOFF]].
 - When the visitor is finished — goodbye, hang up, end the call, or they confirm they do not need more after a brief is sent — say a short closing line, then put [[END_CALL]] alone on the last line. That ends the live call the same way the End button does.
 - Do not end the call while you are still collecting a name, email, or project brief.`;
@@ -71,40 +72,51 @@ export async function runAssistantTurn(
 
   let speakTail = Promise.resolve();
   const emitSpoken = (text: string, waitFor = true) => {
-    if (!text) return speakTail;
+    const visible = sanitizeAssistantText(text, false).trim();
+    if (!visible) return speakTail;
     if (!speak) {
-      send({ type: "token", content: text });
+      send({ type: "token", content: visible });
       return speakTail;
     }
-    const clipPromise = speak(text);
+    const clipPromise = speak(visible);
     speakTail = speakTail.then(async () => {
       try {
         const clip = await clipPromise;
-        if (clip) send({ type: "audio", content: text, ...clip });
-        else send({ type: "token", content: text });
+        if (clip) send({ type: "audio", content: visible, ...clip });
+        else send({ type: "token", content: visible });
       } catch {
-        send({ type: "token", content: text });
+        send({ type: "token", content: visible });
       }
     });
     return waitFor ? speakTail : Promise.resolve();
   };
 
-  if (state.intent === "tour" || isSiteTour(message)) {
-    let spoken = TOUR_INTRO;
-    await emitSpoken(TOUR_INTRO);
-    for (const stop of TOUR_STOPS) {
-      send({ type: "navigate", target: stop.target });
-      const step = tourStepMarkdown(stop);
-      spoken += step;
-      const started = Date.now();
-      await emitSpoken(step);
-      const remaining = 2400 - (Date.now() - started);
-      if (remaining > 0) await wait(remaining);
+  const continueTour = isTourAdvance(message) && lastTourStopIndex(state.messages) >= 0;
+  const playTour = state.intent === "tour" || isSiteTour(message) || continueTour;
+  if (playTour) {
+    const startAt =
+      continueTour && !isSiteTour(message) ? Math.min(TOUR_STOPS.length, lastTourStopIndex(state.messages) + 1) : 0;
+    const stops = TOUR_STOPS.slice(startAt);
+    let spoken = startAt === 0 ? TOUR_INTRO : "";
+    if (startAt === 0) await emitSpoken(TOUR_INTRO);
+    if (stops.length === 0) {
+      spoken += TOUR_CLOSE;
+      await emitSpoken(TOUR_CLOSE);
+    } else {
+      for (const stop of stops) {
+        send({ type: "navigate", target: stop.target });
+        const step = tourStepMarkdown(stop);
+        spoken += step;
+        const started = Date.now();
+        await emitSpoken(step);
+        const remaining = 2400 - (Date.now() - started);
+        if (remaining > 0) await wait(remaining);
+      }
+      send({ type: "navigate", target: "/#top" });
+      await wait(900);
+      spoken += TOUR_CLOSE;
+      await emitSpoken(TOUR_CLOSE);
     }
-    send({ type: "navigate", target: "/#top" });
-    await wait(900);
-    spoken += TOUR_CLOSE;
-    await emitSpoken(TOUR_CLOSE);
     await persistTurn(input.visitorId, { role: "user", content: message });
     await persistTurn(input.visitorId, { role: "assistant", content: spoken });
     await persistVisitor(input.visitorId, { leadName: cleanLeadName(state.leadName), leadEmail: state.leadEmail });
@@ -142,8 +154,8 @@ export async function runAssistantTurn(
   if (speak && speakBuf.trim()) void emitSpoken(speakBuf, false);
   await speakTail;
 
-  const navigateMatch = [...raw.matchAll(NAVIGATE_RE)].pop();
-  if (navigateMatch && !state.navigateTo) send({ type: "navigate", target: navigateMatch[1] });
+  const navigateMatch = extractNavigateTargets(raw).pop();
+  if (navigateMatch && !state.navigateTo) send({ type: "navigate", target: navigateMatch });
 
   const wantsHandoff = state.handoffNeeded || HANDOFF_RE.test(raw);
   let handoffSent = state.handoffSent;

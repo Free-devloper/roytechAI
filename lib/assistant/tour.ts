@@ -54,9 +54,34 @@ export function isSiteTour(text: string) {
     /\bsite tour\b/.test(t) ||
     /\bwalk me through\b/.test(t) ||
     /\bshow me (the |around the )?site\b/.test(t) ||
+    /\bshow me around\b/.test(t) ||
     /\baround the site\b/.test(t) ||
-    /\bguide me (through|around)\b/.test(t)
+    /\bguide me (through|around)\b/.test(t) ||
+    /\b(start|give|take) (me )?(a |the |on a )?tour\b/.test(t)
   );
+}
+
+export function isTourAdvance(text: string) {
+  const t = text.toLowerCase().trim().replace(/[.!?]+$/g, "");
+  return /^(ok(ay)?|alright|sure|yes)?[, ]*(next|continue|go on|keep going|what'?s next)( (section|stop|one))?$/.test(t);
+}
+
+export function lastTourStopIndex(history: Array<{ role: string; content: string }>) {
+  const blob = history.map((turn) => turn.content).join("\n");
+  let last = -1;
+  let lastPos = -1;
+  TOUR_STOPS.forEach((stop, index) => {
+    const markers = [`### ${stop.label}`, stop.target, stop.label];
+    for (const marker of markers) {
+      const pos = blob.lastIndexOf(marker);
+      if (pos > lastPos) {
+        lastPos = pos;
+        last = index;
+      }
+    }
+  });
+  if (last < 0 && /hero section|studio pitch|#top\b/i.test(blob)) return 0;
+  return last;
 }
 
 export function tourStepMarkdown(stop: TourStop) {

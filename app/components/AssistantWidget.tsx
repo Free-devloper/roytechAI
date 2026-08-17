@@ -208,6 +208,7 @@ export default function AssistantWidget() {
   const listRef = useRef<HTMLDivElement>(null);
   const liveRef = useRef(false);
   const hangupRef = useRef(false);
+  const turnOpenRef = useRef(false);
   const channelRef = useRef<VoiceChannel | null>(null);
   const micRef = useRef<MicCapture | null>(null);
   const audioRef = useRef<AudioQueue | null>(null);
@@ -218,6 +219,7 @@ export default function AssistantWidget() {
   const stopLive = async () => {
     liveRef.current = false;
     hangupRef.current = false;
+    turnOpenRef.current = false;
     setLive(false);
     setVoicePhase("idle");
     setTouring(false);
@@ -570,6 +572,7 @@ export default function AssistantWidget() {
           });
         }
         if (event.type === "done") {
+          turnOpenRef.current = false;
           const finalText = sanitizeAssistantText(rawBuffer || spoken, false);
           if (finalText) updateThis((prev) => patchLastAssistant(prev, { content: finalText }));
           if (!audioRef.current?.busy) {
@@ -588,7 +591,7 @@ export default function AssistantWidget() {
       const audio = new AudioQueue();
       audio.onSpeak = (content, durationMs) => revealSpeech?.(content, durationMs);
       audio.onIdle = () => {
-        if (!liveRef.current) return;
+        if (!liveRef.current || turnOpenRef.current) return;
         setLiveText("");
         setTouring(false);
         if (hangupRef.current) {
@@ -603,6 +606,7 @@ export default function AssistantWidget() {
       const channel = await connectVoiceChannel((event) => onEvent(event));
       channelRef.current = channel;
       const startHistory = historyForVoice();
+      turnOpenRef.current = true;
       onEvent = attachTurn(false);
       await channel.sendStart({ history: startHistory });
       if (!audio.busy && liveRef.current) {
@@ -615,6 +619,7 @@ export default function AssistantWidget() {
         setVoicePhase("thinking");
         setError(null);
         hangupRef.current = false;
+        turnOpenRef.current = true;
         const spokenHistory = historyForVoice();
         onEvent = attachTurn(true);
         try {
@@ -625,6 +630,7 @@ export default function AssistantWidget() {
             if (!audio.busy) await stopLive();
             return;
           }
+          if (turnOpenRef.current) return;
           if (!audio.busy) {
             setVoicePhase("listening");
             mic.arm();

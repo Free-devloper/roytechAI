@@ -2,7 +2,7 @@ import { NEED_OPTIONS, type NeedOption } from "./config";
 import { cosine, loadChunks, loadHistory, loadVisitor } from "./db";
 import { embedQuery } from "./openrouter";
 import { buildQuote } from "./pricing";
-import { isSiteTour } from "./tour";
+import { isSiteTour, isTourAdvance, lastTourStopIndex } from "./tour";
 import type { AssistantState, ChatTurn, Intent, RetrievedChunk } from "./types";
 
 const EMAIL_RE = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
@@ -63,6 +63,15 @@ export function detectIntent(text: string, history: ChatTurn[], hasLead: boolean
   );
   if (waitingForLead && (extractEmail(text) || extractName(text, history) || hasLead)) return "handoff";
   if (isSiteTour(text)) return "tour";
+  if (isTourAdvance(text)) {
+    const lastAssistant = [...history].reverse().find((turn) => turn.role === "assistant");
+    if (
+      lastTourStopIndex(history) >= 0 ||
+      /hero section|walk you through|one section at a time|studio pitch/i.test(lastAssistant?.content || "")
+    ) {
+      return "tour";
+    }
+  }
   if (/(talk to (a )?human|speak to|contact (the )?team|talk to rehan|hire|start a build|book|schedule|nda|contract|legal|call me|email me)/i.test(t)) {
     return "handoff";
   }
@@ -128,7 +137,7 @@ Rules:
 - Ground answers in the knowledge. If you cannot, do not invent facts, emails, phone numbers, client names, or guarantees.
 - Quotes are indicative ranges, never a contract.
 - Never write "User Safety", "Response Safety", or any safety labels.
-- If the visitor asks for a site tour, do not dump every section in one list. The product plays the tour itself. For a single section request, put [[NAVIGATE:/#services]] or [[NAVIGATE:/blog]] alone on the last line and say something natural such as "I'll take you to Capabilities."
+- If the visitor asks for a site tour, do not dump every section in one list and do not wait for them to say next. The product plays the full tour itself. Never emit tool-call tags such as <|tool_call_start|>. For a single section request, put [[NAVIGATE:/#services]] or [[NAVIGATE:/blog]] alone on the last line and say something natural such as "I'll take you to Capabilities."
 - When a human should take over, put [[HANDOFF]] alone on the last line. Then politely ask only for the missing lead fields. Do not re-ask the project story if it is already in the thread.
 - Lead on file: name=${state.leadName || "none"}; email=${state.leadEmail || "none"}. Never say you already have a name or email if that field is none. If both are none, ask for name and email together.
 - If a brief was already sent, confirm that and do not pretend to email from a personal inbox.
