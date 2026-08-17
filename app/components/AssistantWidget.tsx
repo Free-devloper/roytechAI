@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { sanitizeAssistantText, type QuoteResult } from "../../lib/assistant/types";
 import { isSiteTour } from "../../lib/assistant/tour";
 import AssistantMarkdown from "./AssistantMarkdown";
+import { AudioQueue, MicCapture, bytesToBase64, connectVoiceChannel, type VoiceChannel, type VoiceEvent } from "./voiceLive";
 
 type ChatTurn = {
   role: "user" | "assistant";
@@ -33,6 +34,8 @@ type SseEvent =
   | { type: "handoff"; sent: boolean; missing?: "name" | "email" | "both" }
   | { type: "done" }
   | { type: "error"; message: string };
+
+type VoicePhase = "idle" | "connecting" | "listening" | "thinking" | "speaking";
 
 const SUGGESTIONS = [
   "Tour the site",
@@ -194,12 +197,34 @@ export default function AssistantWidget() {
   const [view, setView] = useState<"chat" | "history">("chat");
   const [input, setInput] = useState("");
   const [pending, setPending] = useState(false);
+  const [live, setLive] = useState(false);
+  const [voicePhase, setVoicePhase] = useState<VoicePhase>("idle");
+  const [liveText, setLiveText] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [visitorId, setVisitorId] = useState<string | null>(null);
   const [activeId, setActiveId] = useState<string>("");
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [ready, setReady] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
+  const liveRef = useRef(false);
+  const channelRef = useRef<VoiceChannel | null>(null);
+  const micRef = useRef<MicCapture | null>(null);
+  const audioRef = useRef<AudioQueue | null>(null);
+  const conversationsRef = useRef<Conversation[]>([]);
+  const activeIdRef = useRef("");
+  const busy = pending || live;
+
+  const stopLive = async () => {
+    liveRef.current = false;
+    setLive(false);
+    setVoicePhase("idle");
+    micRef.current?.stop();
+    micRef.current = null;
+    audioRef.current?.stop();
+    audioRef.current = null;
+    channelRef.current?.close();
+    channelRef.current = null;
+  };
 
   const setPanelOpen = (next: boolean) => {
     if (next) {
@@ -209,6 +234,7 @@ export default function AssistantWidget() {
       setPanelShown(true);
       return;
     }
+    void stopLive();
     setOpen(false);
     setPanelClosing(true);
     closeTimer.current = window.setTimeout(() => {
@@ -227,6 +253,8 @@ export default function AssistantWidget() {
     () => conversations.find((item) => item.id === activeId)?.messages ?? [],
     [conversations, activeId],
   );
+  conversationsRef.current = conversations;
+  activeIdRef.current = activeId;
 
   useEffect(() => {
     const id = readVisitorId() ?? crypto.randomUUID();
@@ -238,26 +266,25 @@ export default function AssistantWidget() {
   }, []);
 
   useEffect(() => {
-    if (!ready || !visitorId || !activeId) return;
+    if (!ready || !visitorId || !activeId || pending || live) return;
     try {
       saveStore(visitorId, { activeId, conversations });
     } catch {
       // ignore
     }
-  }, [ready, visitorId, activeId, conversations]);
+  }, [ready, visitorId, activeId, conversations, pending, live]);
 
   useEffect(() => {
-    if (view === "chat") {
-      listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });
-    }
-  }, [messages, open, pending, view]);
+    if (view !== "chat" || !listRef.current) return;
+    listRef.current.scrollTop = listRef.current.scrollHeight;
+  }, [messages, liveText, open, pending, view]);
 
   const greeting = messages.length === 0
     ? "I am RoytechAI Assistant. I can walk you through the studio, answer build questions, sketch an indicative quote, and pass a brief to the team when a human should take over."
     : null;
 
   const startNewConversation = () => {
-    if (pending) return;
+    if (busy) return;
     const current = conversations.find((item) => item.id === activeId);
     if (current && current.messages.length === 0) {
       setError(null);
@@ -272,13 +299,14 @@ export default function AssistantWidget() {
   };
 
   const openConversation = (id: string) => {
+    if (live) return;
     setActiveId(id);
     setError(null);
     setView("chat");
   };
 
   const deleteConversation = (id: string) => {
-    if (pending && id === activeId) return;
+    if ((pending || live) && id === activeId) return;
     const target = conversations.find((item) => item.id === id);
     const label = target?.title || "this conversation";
     if (!window.confirm(`Delete “${label}”? This cannot be undone.`)) return;
@@ -299,7 +327,7 @@ export default function AssistantWidget() {
 
   const send = async (text: string) => {
     const message = text.trim();
-    if (!message || pending) return;
+    if (!message || pending || live) return;
     if (isSiteTour(message) && window.location.pathname !== "/") {
       try {
         sessionStorage.setItem("rt_run_tour", "1");
@@ -313,6 +341,7 @@ export default function AssistantWidget() {
     setError(null);
     setPending(true);
     setTouring(isSiteTour(message));
+    setLiveText("");
     setView("chat");
     const conversationId = activeId;
     const updateThis = (updater: (current: ChatTurn[]) => ChatTurn[]) => {
@@ -334,6 +363,37 @@ export default function AssistantWidget() {
       content: turn.role === "assistant" ? sanitizeAssistantText(turn.content) : turn.content,
     }));
     updateThis((prev) => [...prev, { role: "user", content: message }, { role: "assistant", content: "" }]);
+    let rawBuffer = "";
+    let target = "";
+    let shown = "";
+    let raf = 0;
+    let lastTs = 0;
+    const stopPump = () => {
+      if (raf) {
+        cancelAnimationFrame(raf);
+        raf = 0;
+      }
+    };
+    const pump = (ts: number) => {
+      raf = 0;
+      const buffered = target.length - shown.length;
+      if (buffered <= 0) return;
+      const dt = Math.min(50, lastTs ? ts - lastTs : 16);
+      lastTs = ts;
+      const cps = buffered > 180 ? 280 : buffered > 70 ? 150 : 86;
+      const take = Math.max(1, Math.ceil((cps * dt) / 1000));
+      shown = target.slice(0, shown.length + take);
+      setLiveText(shown);
+      if (shown.length < target.length) raf = requestAnimationFrame(pump);
+    };
+    const enqueueVisible = (nextTarget: string) => {
+      target = nextTarget;
+      if (shown.length > target.length) {
+        shown = target;
+        setLiveText(shown);
+      }
+      if (!raf && shown.length < target.length) raf = requestAnimationFrame(pump);
+    };
     try {
       const response = await fetch("/api/assistant/chat", {
         method: "POST",
@@ -351,13 +411,8 @@ export default function AssistantWidget() {
       await parseSse(response, (event) => {
         if (event.type === "session") setVisitorId(event.visitorId);
         if (event.type === "token") {
-          updateThis((prev) => {
-            const last = prev[prev.length - 1];
-            if (last?.role !== "assistant") return prev;
-            return patchLastAssistant(prev, {
-              content: sanitizeAssistantText(last.content + event.content),
-            });
-          });
+          rawBuffer += event.content;
+          enqueueVisible(sanitizeAssistantText(rawBuffer, true));
         }
         if (event.type === "navigate") {
           navigateTo(event.target);
@@ -380,14 +435,176 @@ export default function AssistantWidget() {
       updateThis((prev) => {
         const next = [...prev];
         const last = next[next.length - 1];
-        if (last?.role === "assistant" && !last.content) next.pop();
+        if (last?.role === "assistant" && !last.content && !shown) next.pop();
         return next;
       });
     } finally {
+      stopPump();
+      const finalText = sanitizeAssistantText(rawBuffer || shown, false);
+      if (finalText) {
+        shown = finalText;
+        setLiveText(finalText);
+        updateThis((prev) => patchLastAssistant(prev, { content: finalText }));
+      }
       setPending(false);
       setTouring(false);
+      setLiveText("");
     }
   };
+
+  const historyForVoice = () => {
+    const current = conversationsRef.current.find((item) => item.id === activeIdRef.current)?.messages ?? [];
+    return current.map((turn) => ({
+      role: turn.role,
+      content: turn.role === "assistant" ? sanitizeAssistantText(turn.content) : turn.content,
+    }));
+  };
+
+  const startLive = async () => {
+    if (pending || liveRef.current) return;
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setError("Live conversation needs microphone access in this browser.");
+      return;
+    }
+    liveRef.current = true;
+    setLive(true);
+    setVoicePhase("connecting");
+    setError(null);
+    setView("chat");
+    setLiveText("");
+    const conversationId = activeIdRef.current;
+    const updateThis = (updater: (current: ChatTurn[]) => ChatTurn[]) => {
+      setConversations((prev) =>
+        prev.map((item) => {
+          if (item.id !== conversationId) return item;
+          const nextMessages = updater(item.messages);
+          return {
+            ...item,
+            messages: nextMessages,
+            title: titleFromMessages(nextMessages),
+            updatedAt: new Date().toISOString(),
+          };
+        }),
+      );
+    };
+    const attachTurn = (includeUser: boolean) => {
+      let rawBuffer = "";
+      if (includeUser) {
+        updateThis((prev) => [...prev, { role: "user", content: "Listening…" }, { role: "assistant", content: "" }]);
+      } else {
+        updateThis((prev) => [...prev, { role: "assistant", content: "" }]);
+      }
+      return (event: VoiceEvent) => {
+        if (event.type === "session") setVisitorId(event.visitorId);
+        if (event.type === "transcript") {
+          updateThis((prev) => {
+            const next = [...prev];
+            for (let i = next.length - 1; i >= 0; i -= 1) {
+              if (next[i].role === "user") {
+                next[i] = { ...next[i], content: event.text };
+                break;
+              }
+            }
+            return next;
+          });
+        }
+        if (event.type === "token") {
+          rawBuffer += event.content;
+          const shown = sanitizeAssistantText(rawBuffer, true);
+          setLiveText(shown);
+        }
+        if (event.type === "audio") {
+          setVoicePhase("speaking");
+          micRef.current?.pause();
+          audioRef.current?.enqueue(event);
+        }
+        if (event.type === "navigate") {
+          navigateTo(event.target);
+          updateThis((prev) =>
+            patchLastAssistant(prev, {
+              action: { kind: "navigate", label: sectionLabel(event.target), target: event.target },
+            }),
+          );
+        }
+        if (event.type === "quote") updateThis((prev) => patchLastAssistant(prev, { quote: event.quote }));
+        if (event.type === "handoff") updateThis((prev) => patchLastAssistant(prev, { handoffSent: event.sent }));
+        if (event.type === "error") {
+          setError(event.message);
+          updateThis((prev) => {
+            const next = [...prev];
+            const last = next[next.length - 1];
+            if (last?.role === "assistant" && !last.content && !rawBuffer) next.pop();
+            if (next[next.length - 1]?.content === "Listening…") next.pop();
+            return next;
+          });
+        }
+        if (event.type === "done") {
+          const finalText = sanitizeAssistantText(rawBuffer, false);
+          if (finalText) {
+            setLiveText(finalText);
+            updateThis((prev) => patchLastAssistant(prev, { content: finalText }));
+          }
+          setLiveText("");
+        }
+      };
+    };
+    try {
+      const mic = new MicCapture();
+      await mic.start();
+      mic.pause();
+      micRef.current = mic;
+      const audio = new AudioQueue();
+      audio.onIdle = () => {
+        if (!liveRef.current) return;
+        setVoicePhase("listening");
+        mic.arm();
+      };
+      audioRef.current = audio;
+      let onEvent: (event: VoiceEvent) => void = () => undefined;
+      const channel = await connectVoiceChannel((event) => onEvent(event));
+      channelRef.current = channel;
+      const startHistory = historyForVoice();
+      onEvent = attachTurn(false);
+      await channel.sendStart({ history: startHistory });
+      if (!audio.busy && liveRef.current) {
+        setVoicePhase("listening");
+        mic.arm();
+      }
+      mic.onUtterance = async (blob, format) => {
+        if (!liveRef.current || !channelRef.current) return;
+        mic.pause();
+        setVoicePhase("thinking");
+        setError(null);
+        const spokenHistory = historyForVoice();
+        onEvent = attachTurn(true);
+        try {
+          const bytes = new Uint8Array(await blob.arrayBuffer());
+          await channelRef.current.sendUtterance(bytesToBase64(bytes), format, { history: spokenHistory });
+          if (!audio.busy && liveRef.current) {
+            setVoicePhase("listening");
+            mic.arm();
+          }
+        } catch (err) {
+          if (!liveRef.current) return;
+          setError(err instanceof Error ? err.message : "Live conversation failed.");
+          setVoicePhase("listening");
+          mic.arm();
+        }
+      };
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not start a live conversation.");
+      await stopLive();
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      liveRef.current = false;
+      micRef.current?.stop();
+      audioRef.current?.stop();
+      channelRef.current?.close();
+    };
+  }, []);
 
   useEffect(() => {
     if (!ready || !activeId) return;
@@ -417,7 +634,7 @@ export default function AssistantWidget() {
   const historyItems = [...conversations].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 
   return (
-    <div className={`rt-assistant ${open ? "open" : ""} ${panelClosing ? "closing" : ""} ${pending ? (touring ? "touring" : "responding") : ""}`}>
+    <div className={`rt-assistant ${open ? "open" : ""} ${panelClosing ? "closing" : ""} ${live ? `live ${voicePhase}` : pending ? (touring ? "touring" : "responding") : ""}`}>
       {panelShown && (
         <section className={`rt-assistant-panel ${panelClosing ? "closing" : ""}`} aria-label="RoytechAI Assistant conversation">
           <header className="rt-assistant-head">
@@ -429,12 +646,23 @@ export default function AssistantWidget() {
                   {conversations.find((item) => item.id === activeId)?.title || "New conversation"}
                 </span>
               )}
-              {pending && (
+              {live ? (
+                <span className={`rt-agent-live ${voicePhase === "listening" ? "listen" : "reply"}`}>
+                  <i />
+                  {voicePhase === "connecting"
+                    ? "Connecting live call"
+                    : voicePhase === "listening"
+                      ? "Listening"
+                      : voicePhase === "speaking"
+                        ? "Speaking"
+                        : "Thinking"}
+                </span>
+              ) : pending ? (
                 <span className={`rt-agent-live ${touring ? "tour" : "reply"}`}>
                   <i />
                   {touring ? "Guiding the tour" : "Responding"}
                 </span>
-              )}
+              ) : null}
             </div>
             <button type="button" className="rt-assistant-close" onClick={() => setPanelOpen(false)} aria-label="Close assistant">
               ×
@@ -445,10 +673,11 @@ export default function AssistantWidget() {
               type="button"
               className={view === "history" ? "active" : ""}
               onClick={() => setView(view === "history" ? "chat" : "history")}
+              disabled={live}
             >
               {view === "history" ? "Back to chat" : "History"}
             </button>
-            <button type="button" onClick={startNewConversation} disabled={pending}>
+            <button type="button" onClick={startNewConversation} disabled={busy}>
               New chat
             </button>
           </nav>
@@ -468,7 +697,7 @@ export default function AssistantWidget() {
                     type="button"
                     className="rt-history-delete"
                     onClick={() => deleteConversation(item.id)}
-                    disabled={pending && item.id === activeId}
+                    disabled={busy && item.id === activeId}
                     aria-label={`Delete ${item.title}`}
                   >
                     Delete
@@ -479,21 +708,25 @@ export default function AssistantWidget() {
           ) : (
             <>
               <div className="rt-assistant-thread" ref={listRef}>
-                {greeting && (
+                {greeting && !live && (
                   <article className="rt-bubble assistant">
                     <AssistantMarkdown text={greeting} />
                   </article>
                 )}
                 {messages.map((turn, index) => {
-                  const content =
-                    turn.role === "assistant" ? sanitizeAssistantText(turn.content) : turn.content;
-                  const waiting = pending && index === messages.length - 1 && turn.role === "assistant" && !content;
+                  const isLive = (pending || live) && index === messages.length - 1 && turn.role === "assistant";
+                  const content = isLive
+                    ? liveText
+                    : turn.role === "assistant"
+                      ? sanitizeAssistantText(turn.content)
+                      : turn.content;
+                  const waiting = isLive && !content;
                   return (
                     <article className={`rt-bubble ${turn.role}`} key={`${turn.role}-${index}`}>
                     {waiting ? (
-                      <p className="rt-thinking">Thinking…</p>
+                      <p className="rt-thinking">{live ? (voicePhase === "listening" ? "Listening…" : "Thinking…") : "Thinking…"}</p>
                     ) : turn.role === "assistant" ? (
-                      <AssistantMarkdown text={content} />
+                      <AssistantMarkdown text={content} streaming={isLive} />
                     ) : (
                       <p>{content}</p>
                     )}
@@ -524,7 +757,7 @@ export default function AssistantWidget() {
               </div>
               <div className="rt-suggestions">
                 {SUGGESTIONS.map((item) => (
-                  <button type="button" key={item} onClick={() => send(item)} disabled={pending}>
+                  <button type="button" key={item} onClick={() => send(item)} disabled={busy}>
                     {item}
                   </button>
                 ))}
@@ -539,14 +772,40 @@ export default function AssistantWidget() {
                 <input
                   value={input}
                   onChange={(event) => setInput(event.target.value)}
-                  placeholder="Ask about agents, quotes, or a section…"
+                  placeholder={
+                    live
+                      ? voicePhase === "listening"
+                        ? "Listening… speak when you are ready"
+                        : voicePhase === "speaking"
+                          ? "Assistant is speaking…"
+                          : "Live call connected…"
+                      : "Ask about agents, quotes, or a section…"
+                  }
                   aria-label="Message RoytechAI Assistant"
-                  disabled={pending}
+                  disabled={busy}
                 />
+                <button
+                  type="button"
+                  className={`rt-talk ${live ? "live" : ""}`}
+                  onClick={() => {
+                    if (live) void stopLive();
+                    else void startLive();
+                  }}
+                  disabled={pending && !live}
+                  aria-pressed={live}
+                  aria-label={live ? "End live conversation" : "Start live conversation"}
+                >
+                  <span className="rt-talk-wave" aria-hidden="true">
+                    <i />
+                    <i />
+                    <i />
+                  </span>
+                  {live ? "End" : "Talk"}
+                </button>
                 <button
                   type="submit"
                   className={pending ? "rt-send-busy" : ""}
-                  disabled={pending || !input.trim()}
+                  disabled={busy || !input.trim()}
                   aria-busy={pending}
                   aria-label={pending ? (touring ? "Assistant is touring the site" : "Assistant is responding") : "Send message"}
                 >

@@ -5,6 +5,7 @@ import { lexer, type Token, type Tokens } from "marked";
 
 type Props = {
   text: string;
+  streaming?: boolean;
 };
 
 const BOLD_LEAD = /^(?:\d+[.)]\s+)?\*\*[^*\n]+\*\*/;
@@ -229,22 +230,23 @@ function Blocks({ tokens }: { tokens: Token[] }) {
   return tokens.map((token, index) => <Block key={`${token.type}-${index}`} token={token} />);
 }
 
-export default function AssistantMarkdown({ text }: Props) {
+export default function AssistantMarkdown({ text, streaming = false }: Props) {
   const tokens = useMemo(() => {
-    const source = normalizeAssistantMarkdown(text);
+    const source = streaming ? text.trim() : normalizeAssistantMarkdown(text);
     if (!source) return null;
     try {
       return lexer(source, { gfm: true, breaks: true });
     } catch {
       return null;
     }
-  }, [text]);
+  }, [text, streaming]);
 
   if (!text.trim()) return null;
-  if (!tokens) return <p>{normalizeAssistantMarkdown(text)}</p>;
+  if (!tokens) return <p>{streaming ? text : normalizeAssistantMarkdown(text)}</p>;
   return (
-    <div className="rt-md">
+    <div className={`rt-md ${streaming ? "streaming" : ""}`}>
       <Blocks tokens={tokens} />
+      {streaming && <span className="rt-stream-caret" aria-hidden="true" />}
     </div>
   );
 }

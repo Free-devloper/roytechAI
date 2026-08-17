@@ -1,29 +1,11 @@
 import { sendContactBrief } from "./contact-webhook";
 import { persistTurn, persistVisitor } from "./db";
 import { assistantGraph } from "./graph";
+import { corsHeaders, sseLine, visitorFromRequest } from "./http";
 import { streamChat, toOpenRouterMessages } from "./openrouter";
-import { VISITOR_COOKIE } from "./config";
 import { cleanLeadName } from "./prepare";
 import { HANDOFF_RE, NAVIGATE_RE, sanitizeAssistantText, type ChatTurn, type SseEvent } from "./types";
 import { TOUR_CLOSE, TOUR_INTRO, TOUR_STOPS, isSiteTour, tourStepMarkdown } from "./tour";
-
-function cookieValue(header: string | null, name: string) {
-  if (!header) return null;
-  const match = header.split(";").map((part) => part.trim()).find((part) => part.startsWith(`${name}=`));
-  return match ? decodeURIComponent(match.slice(name.length + 1)) : null;
-}
-
-function newVisitorId() {
-  return crypto.randomUUID();
-}
-
-function visitorCookie(id: string) {
-  return `${VISITOR_COOKIE}=${id}; Path=/; Max-Age=31536000; SameSite=Lax; HttpOnly`;
-}
-
-function sseLine(event: SseEvent) {
-  return `data: ${JSON.stringify(event)}\n\n`;
-}
 
 function stripControl(text: string) {
   return sanitizeAssistantText(text, false);
@@ -70,9 +52,7 @@ export async function handleAssistantRequest(request: Request) {
     return Response.json({ error: "message is required" }, { status: 400, headers: corsHeaders() });
   }
 
-  const existingId = cookieValue(request.headers.get("cookie"), VISITOR_COOKIE);
-  const visitorId = existingId || newVisitorId();
-  const setCookie = existingId ? null : visitorCookie(visitorId);
+  const { visitorId, setCookie } = visitorFromRequest(request);
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -232,12 +212,4 @@ export async function handleContactRequest(request: Request) {
     const message = error instanceof Error ? error.message : "Contact request failed";
     return Response.json({ error: message }, { status: 500, headers: corsHeaders() });
   }
-}
-
-function corsHeaders() {
-  return new Headers({
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
-  });
 }

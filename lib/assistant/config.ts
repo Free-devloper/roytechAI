@@ -51,6 +51,18 @@ export function chatModel() {
   return env("OPENROUTER_CHAT_MODEL", "openrouter/free");
 }
 
+export function ttsModel() {
+  return env("OPENROUTER_TTS_MODEL", "deepgram/flux-tts:free");
+}
+
+export function ttsVoice() {
+  return env("OPENROUTER_TTS_VOICE", "flux-alexis-en");
+}
+
+export function sttModel() {
+  return env("OPENROUTER_STT_MODEL", "openai/whisper-1");
+}
+
 export function embeddingModel() {
   return env("OPENROUTER_EMBEDDING_MODEL", "qwen/qwen3-embedding-8b");
 }

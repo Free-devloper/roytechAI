@@ -48,6 +48,9 @@ export type SseEvent =
   | { type: "navigate"; target: string }
   | { type: "quote"; quote: QuoteResult }
   | { type: "handoff"; sent: boolean; missing?: "name" | "email" | "both" }
+  | { type: "transcript"; text: string }
+  | { type: "audio"; mime: string; data: string; rate?: number }
+  | { type: "hello" }
   | { type: "done" }
   | { type: "error"; message: string };
 

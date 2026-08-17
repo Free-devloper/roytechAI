@@ -4,11 +4,16 @@
   "outputDirectory": "dist/client",
   "rewrites": [
     { "source": "/api/assistant/chat", "destination": "/api/assistant" },
+    { "source": "/api/assistant/voice", "destination": "/api/voice" },
     { "source": "/blog", "destination": "/blog/index.html" },
     { "source": "/((?!api/|assets/|robots.txt|sitemap.xml).*)", "destination": "/index.html" }
   ],
   "functions": {
     "api/assistant.js": {
+      "includeFiles": "data/chunks.json",
+      "maxDuration": 60
+    },
+    "api/voice.js": {
       "includeFiles": "data/chunks.json",
       "maxDuration": 60
     },

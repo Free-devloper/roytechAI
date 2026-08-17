@@ -29,6 +29,11 @@ const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
+    if (url.pathname === "/api/assistant/voice" && request.headers.get("Upgrade")?.toLowerCase() === "websocket") {
+      const { handleVoiceUpgrade } = await import("../lib/assistant/voice");
+      return handleVoiceUpgrade(request);
+    }
+
     if (url.pathname === "/_vinext/image") {
       const allowedWidths = [...DEFAULT_DEVICE_SIZES, ...DEFAULT_IMAGE_SIZES];
       return handleImageOptimization(request, {

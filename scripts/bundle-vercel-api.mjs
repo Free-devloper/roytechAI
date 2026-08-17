@@ -20,6 +20,7 @@ await esbuild.build({
   entryPoints: {
     assistant: join(root, "server", "vercel-assistant.ts"),
     contact: join(root, "server", "vercel-contact.ts"),
+    voice: join(root, "server", "vercel-voice.ts"),
   },
   bundle: true,
   platform: "node",
