@@ -1,15 +1,6 @@
 import { Annotation, END, START, StateGraph } from "@langchain/langgraph";
 import { loadHistory, loadVisitor } from "./db";
-import {
-  buildSystemPrompt,
-  compileBrief,
-  detectIntent,
-  detectNavigate,
-  extractEmail,
-  extractName,
-  mapNeed,
-  retrieveChunks,
-} from "./prepare";
+import { extractEmail, extractName, cleanLeadName, detectIntent, detectNavigate, mapNeed, retrieveChunks, compileBrief, buildSystemPrompt } from "./prepare";
 import { buildQuote } from "./pricing";
 import type { ChatTurn, Intent, QuoteResult, RetrievedChunk } from "./types";
 
@@ -50,7 +41,7 @@ async function loadHistoryNode(state: GraphState) {
   const messages = base.concat({ role: "user", content: state.lastUserMessage });
   return {
     messages,
-    leadName: extractName(state.lastUserMessage, messages) || state.clientLeadName || visitor.leadName,
+    leadName: cleanLeadName(extractName(state.lastUserMessage, messages) || state.clientLeadName || visitor.leadName),
     leadEmail: extractEmail(state.lastUserMessage) || state.clientLeadEmail || visitor.leadEmail,
     handoffSent: visitor.handoffSent,
   };

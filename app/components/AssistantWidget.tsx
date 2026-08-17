@@ -187,6 +187,10 @@ async function parseSse(response: Response, onEvent: (event: SseEvent) => void) 
 
 export default function AssistantWidget() {
   const [open, setOpen] = useState(false);
+  const [panelShown, setPanelShown] = useState(false);
+  const [panelClosing, setPanelClosing] = useState(false);
+  const [touring, setTouring] = useState(false);
+  const closeTimer = useRef<number | null>(null);
   const [view, setView] = useState<"chat" | "history">("chat");
   const [input, setInput] = useState("");
   const [pending, setPending] = useState(false);
@@ -196,6 +200,28 @@ export default function AssistantWidget() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [ready, setReady] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
+
+  const setPanelOpen = (next: boolean) => {
+    if (next) {
+      if (closeTimer.current) window.clearTimeout(closeTimer.current);
+      setPanelClosing(false);
+      setOpen(true);
+      setPanelShown(true);
+      return;
+    }
+    setOpen(false);
+    setPanelClosing(true);
+    closeTimer.current = window.setTimeout(() => {
+      setPanelShown(false);
+      setPanelClosing(false);
+    }, 280);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (closeTimer.current) window.clearTimeout(closeTimer.current);
+    };
+  }, []);
 
   const messages = useMemo(
     () => conversations.find((item) => item.id === activeId)?.messages ?? [],
@@ -286,6 +312,7 @@ export default function AssistantWidget() {
     setInput("");
     setError(null);
     setPending(true);
+    setTouring(isSiteTour(message));
     setView("chat");
     const conversationId = activeId;
     const updateThis = (updater: (current: ChatTurn[]) => ChatTurn[]) => {
@@ -358,6 +385,7 @@ export default function AssistantWidget() {
       });
     } finally {
       setPending(false);
+      setTouring(false);
     }
   };
 
@@ -389,9 +417,9 @@ export default function AssistantWidget() {
   const historyItems = [...conversations].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 
   return (
-    <div className={`rt-assistant ${open ? "open" : ""}`}>
-      {open && (
-        <section className="rt-assistant-panel" aria-label="RoytechAI Assistant conversation">
+    <div className={`rt-assistant ${open ? "open" : ""} ${panelClosing ? "closing" : ""} ${pending ? (touring ? "touring" : "responding") : ""}`}>
+      {panelShown && (
+        <section className={`rt-assistant-panel ${panelClosing ? "closing" : ""}`} aria-label="RoytechAI Assistant conversation">
           <header className="rt-assistant-head">
             <div>
               <small>ON-SITE GUIDE</small>
@@ -401,8 +429,14 @@ export default function AssistantWidget() {
                   {conversations.find((item) => item.id === activeId)?.title || "New conversation"}
                 </span>
               )}
+              {pending && (
+                <span className={`rt-agent-live ${touring ? "tour" : "reply"}`}>
+                  <i />
+                  {touring ? "Guiding the tour" : "Responding"}
+                </span>
+              )}
             </div>
-            <button type="button" className="rt-assistant-close" onClick={() => setOpen(false)} aria-label="Close assistant">
+            <button type="button" className="rt-assistant-close" onClick={() => setPanelOpen(false)} aria-label="Close assistant">
               ×
             </button>
           </header>
@@ -514,12 +548,12 @@ export default function AssistantWidget() {
                   className={pending ? "rt-send-busy" : ""}
                   disabled={pending || !input.trim()}
                   aria-busy={pending}
-                  aria-label={pending ? "Assistant is responding" : "Send message"}
+                  aria-label={pending ? (touring ? "Assistant is touring the site" : "Assistant is responding") : "Send message"}
                 >
                   {pending ? (
                     <>
                       <span className="rt-send-spinner" aria-hidden="true" />
-                      Responding
+                      {touring ? "Touring" : "Responding"}
                     </>
                   ) : (
                     "Send"
@@ -533,7 +567,7 @@ export default function AssistantWidget() {
       <button
         type="button"
         className="rt-assistant-fab"
-        onClick={() => setOpen((value) => !value)}
+        onClick={() => setPanelOpen(!open)}
         aria-expanded={open}
         aria-label={open ? "Close RoytechAI Assistant" : "Open RoytechAI Assistant"}
       >

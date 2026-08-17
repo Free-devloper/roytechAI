@@ -3,6 +3,7 @@ import { persistTurn, persistVisitor } from "./db";
 import { assistantGraph } from "./graph";
 import { streamChat, toOpenRouterMessages } from "./openrouter";
 import { VISITOR_COOKIE } from "./config";
+import { cleanLeadName } from "./prepare";
 import { HANDOFF_RE, NAVIGATE_RE, sanitizeAssistantText, type ChatTurn, type SseEvent } from "./types";
 import { TOUR_CLOSE, TOUR_INTRO, TOUR_STOPS, isSiteTour, tourStepMarkdown } from "./tour";
 
@@ -29,10 +30,20 @@ function stripControl(text: string) {
 }
 
 function missingLead(name: string | null, email: string | null): "name" | "email" | "both" | null {
-  if (!name && !email) return "both";
-  if (!name) return "name";
-  if (!email) return "email";
+  const hasName = Boolean(cleanLeadName(name));
+  const hasEmail = Boolean(email);
+  if (!hasName && !hasEmail) return "both";
+  if (!hasName) return "name";
+  if (!hasEmail) return "email";
   return null;
+}
+
+function hasCorrectLeadAsk(raw: string, missing: "name" | "email" | "both") {
+  const text = raw.toLowerCase();
+  const claimedName = /i have your name/.test(text);
+  if (missing === "both") return /name/.test(text) && /email/.test(text) && !claimedName;
+  if (missing === "name") return /share your name|your name/.test(text) && !claimedName;
+  return /share your email|your email/.test(text) && claimedName;
 }
 
 function wait(ms: number) {
@@ -97,7 +108,7 @@ export async function handleAssistantRequest(request: Request) {
           send({ type: "token", content: TOUR_CLOSE });
           await persistTurn(visitorId, { role: "user", content: message });
           await persistTurn(visitorId, { role: "assistant", content: spoken });
-          await persistVisitor(visitorId, { leadName: state.leadName, leadEmail: state.leadEmail });
+          await persistVisitor(visitorId, { leadName: cleanLeadName(state.leadName), leadEmail: state.leadEmail });
           send({ type: "done" });
           return;
         }
@@ -129,7 +140,7 @@ export async function handleAssistantRequest(request: Request) {
           const missing = missingLead(state.leadName, state.leadEmail);
           if (missing) {
             send({ type: "handoff", sent: false, missing });
-            if (!/name|email/i.test(raw)) {
+            if (!hasCorrectLeadAsk(raw, missing)) {
               const ask =
                 missing === "both"
                   ? "\n\nI can pass this to a human on the RoyTech AI team. Please share your name and email."
@@ -150,7 +161,7 @@ export async function handleAssistantRequest(request: Request) {
             });
             handoffSent = true;
             await persistVisitor(visitorId, {
-              leadName: state.leadName,
+              leadName: cleanLeadName(state.leadName),
               leadEmail: state.leadEmail,
               handoffSent: true,
             });
@@ -166,7 +177,7 @@ export async function handleAssistantRequest(request: Request) {
         const assistantText = stripControl(raw) || "I am here to help with RoyTech AI services, quotes, and site navigation.";
         await persistTurn(visitorId, { role: "user", content: message });
         await persistTurn(visitorId, { role: "assistant", content: assistantText });
-        await persistVisitor(visitorId, { leadName: state.leadName, leadEmail: state.leadEmail });
+        await persistVisitor(visitorId, { leadName: cleanLeadName(state.leadName), leadEmail: state.leadEmail });
         send({ type: "done" });
       } catch (error) {
         const errMessage = error instanceof Error ? error.message : "Assistant failed.";

@@ -6,9 +6,32 @@ import { isSiteTour } from "./tour";
 import type { AssistantState, ChatTurn, Intent, RetrievedChunk } from "./types";
 
 const EMAIL_RE = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
+const NAME_STOP = new Set([
+  "a", "an", "and", "build", "capabilities", "contact", "email", "estimate", "estimator",
+  "hello", "help", "hey", "hi", "how", "human", "is", "my", "name", "no", "ok", "okay",
+  "or", "please", "quote", "services", "show", "site", "start", "team", "tell", "thank",
+  "thanks", "the", "this", "tour", "what", "who", "why", "yes",
+]);
+const ASKED_FOR_NAME_RE =
+  /(?:share|send|leave)\s+your\s+name|what(?:'s| is)\s+your\s+name|name and email|your name so the team/i;
 
 export function extractEmail(text: string) {
   return text.match(EMAIL_RE)?.[0] ?? null;
+}
+
+export function isPlausibleName(value: string | null | undefined): value is string {
+  if (!value) return false;
+  const trimmed = value.trim();
+  if (trimmed.length < 2 || trimmed.length > 40) return false;
+  if (EMAIL_RE.test(trimmed)) return false;
+  const words = trimmed.split(/\s+/);
+  if (words.length < 1 || words.length > 3) return false;
+  if (words.some((word) => NAME_STOP.has(word.toLowerCase()))) return false;
+  return words.every((word) => /^[A-Za-z][A-Za-z'-]*$/.test(word));
+}
+
+export function cleanLeadName(value: string | null | undefined) {
+  return isPlausibleName(value) ? value.trim() : null;
 }
 
 export function extractName(text: string, history: ChatTurn[]) {
@@ -18,13 +41,17 @@ export function extractName(text: string, history: ChatTurn[]) {
   ];
   for (const pattern of patterns) {
     const match = text.match(pattern);
-    if (match?.[1] && !EMAIL_RE.test(match[1])) return match[1].trim();
+    const candidate = match?.[1]?.trim();
+    if (candidate && !EMAIL_RE.test(candidate) && isPlausibleName(candidate)) return candidate;
   }
-  const asked = history.slice(-4).some((turn) => turn.role === "assistant" && /name/i.test(turn.content));
-  if (asked) {
+  const lastAssistant = [...history].reverse().find((turn) => turn.role === "assistant");
+  if (lastAssistant && ASKED_FOR_NAME_RE.test(lastAssistant.content)) {
     const compact = text.replace(EMAIL_RE, "").replace(/[,.]/g, " ").trim();
     const words = compact.split(/\s+/).filter((word) => /^[A-Za-z][A-Za-z'-]+$/.test(word));
-    if (words.length >= 1 && words.length <= 4 && compact.length < 60) return words.join(" ");
+    const candidate = words.join(" ");
+    if (words.length >= 1 && words.length <= 3 && compact.length < 40 && isPlausibleName(candidate)) {
+      return candidate;
+    }
   }
   return null;
 }
@@ -102,7 +129,8 @@ Rules:
 - Quotes are indicative ranges, never a contract.
 - Never write "User Safety", "Response Safety", or any safety labels.
 - If the visitor asks for a site tour, do not dump every section in one list. The product plays the tour itself. For a single section request, put [[NAVIGATE:/#services]] or [[NAVIGATE:/blog]] alone on the last line and say something natural such as "I'll take you to Capabilities."
-- When a human should take over, put [[HANDOFF]] alone on the last line. Then politely ask only for name and email if they are missing. Do not re-ask the project story if it is already in the thread.
+- When a human should take over, put [[HANDOFF]] alone on the last line. Then politely ask only for the missing lead fields. Do not re-ask the project story if it is already in the thread.
+- Lead on file: name=${state.leadName || "none"}; email=${state.leadEmail || "none"}. Never say you already have a name or email if that field is none. If both are none, ask for name and email together.
 - If a brief was already sent, confirm that and do not pretend to email from a personal inbox.
 - Keep replies concise, professional, and specific. Write only visitor-facing prose besides those hidden control lines.
 - Format in Markdown: **bold** for roles, phases, and key terms; ### headings for section labels such as "Key steps".
@@ -145,7 +173,7 @@ export async function hydrateState(input: {
     content: input.message,
   });
   const leadEmail = extractEmail(input.message) || input.leadEmail || visitor.leadEmail;
-  const leadName = extractName(input.message, messages) || input.leadName || visitor.leadName;
+  const leadName = cleanLeadName(extractName(input.message, messages) || input.leadName || visitor.leadName);
   const intent = detectIntent(input.message, messages, Boolean(leadName && leadEmail));
   const navigateTo = intent === "navigate" ? detectNavigate(input.message) : null;
   const quote = intent === "quote" || /quote|estimate|price|cost/.test(input.message.toLowerCase())
