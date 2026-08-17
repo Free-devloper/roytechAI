@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { sanitizeAssistantText, type QuoteResult } from "../../lib/assistant/types";
+import { isSiteTour } from "../../lib/assistant/tour";
 import AssistantMarkdown from "./AssistantMarkdown";
 
 type ChatTurn = {
@@ -273,6 +274,15 @@ export default function AssistantWidget() {
   const send = async (text: string) => {
     const message = text.trim();
     if (!message || pending) return;
+    if (isSiteTour(message) && window.location.pathname !== "/") {
+      try {
+        sessionStorage.setItem("rt_run_tour", "1");
+      } catch {
+        // ignore
+      }
+      window.location.href = "/";
+      return;
+    }
     setInput("");
     setError(null);
     setPending(true);
@@ -350,6 +360,22 @@ export default function AssistantWidget() {
       setPending(false);
     }
   };
+
+  useEffect(() => {
+    if (!ready || !activeId) return;
+    try {
+      if (sessionStorage.getItem("rt_run_tour") !== "1") return;
+      sessionStorage.removeItem("rt_run_tour");
+    } catch {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      void send("Tour the site");
+    }, 350);
+    return () => window.clearTimeout(timer);
+    // Kick off a deferred tour after returning to the homepage.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, activeId]);
 
   const applyQuote = (quote: QuoteResult) => {
     window.dispatchEvent(
@@ -483,8 +509,21 @@ export default function AssistantWidget() {
                   aria-label="Message RoytechAI Assistant"
                   disabled={pending}
                 />
-                <button type="submit" disabled={pending || !input.trim()}>
-                  Send
+                <button
+                  type="submit"
+                  className={pending ? "rt-send-busy" : ""}
+                  disabled={pending || !input.trim()}
+                  aria-busy={pending}
+                  aria-label={pending ? "Assistant is responding" : "Send message"}
+                >
+                  {pending ? (
+                    <>
+                      <span className="rt-send-spinner" aria-hidden="true" />
+                      Responding
+                    </>
+                  ) : (
+                    "Send"
+                  )}
                 </button>
               </form>
             </>

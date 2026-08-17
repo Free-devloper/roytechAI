@@ -4,6 +4,7 @@ import { assistantGraph } from "./graph";
 import { streamChat, toOpenRouterMessages } from "./openrouter";
 import { VISITOR_COOKIE } from "./config";
 import { HANDOFF_RE, NAVIGATE_RE, sanitizeAssistantText, type ChatTurn, type SseEvent } from "./types";
+import { TOUR_CLOSE, TOUR_INTRO, TOUR_STOPS, isSiteTour, tourStepMarkdown } from "./tour";
 
 function cookieValue(header: string | null, name: string) {
   if (!header) return null;
@@ -32,6 +33,10 @@ function missingLead(name: string | null, email: string | null): "name" | "email
   if (!name) return "name";
   if (!email) return "email";
   return null;
+}
+
+function wait(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export async function handleAssistantRequest(request: Request) {
@@ -74,7 +79,28 @@ export async function handleAssistantRequest(request: Request) {
         });
 
         if (state.quote) send({ type: "quote", quote: state.quote });
-        if (state.navigateTo) send({ type: "navigate", target: state.navigateTo });
+        if (state.intent !== "tour" && state.navigateTo) send({ type: "navigate", target: state.navigateTo });
+
+        if (state.intent === "tour" || isSiteTour(message)) {
+          let spoken = TOUR_INTRO;
+          send({ type: "token", content: TOUR_INTRO });
+          for (const stop of TOUR_STOPS) {
+            send({ type: "navigate", target: stop.target });
+            const step = tourStepMarkdown(stop);
+            spoken += step;
+            send({ type: "token", content: step });
+            await wait(2400);
+          }
+          send({ type: "navigate", target: "/#top" });
+          await wait(900);
+          spoken += TOUR_CLOSE;
+          send({ type: "token", content: TOUR_CLOSE });
+          await persistTurn(visitorId, { role: "user", content: message });
+          await persistTurn(visitorId, { role: "assistant", content: spoken });
+          await persistVisitor(visitorId, { leadName: state.leadName, leadEmail: state.leadEmail });
+          send({ type: "done" });
+          return;
+        }
 
         let raw = "";
         let flushed = "";

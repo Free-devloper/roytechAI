@@ -5,7 +5,7 @@ export type ChatTurn = {
   content: string;
 };
 
-export type Intent = "quote" | "navigate" | "qa" | "handoff";
+export type Intent = "quote" | "navigate" | "qa" | "handoff" | "tour";
 
 export type RetrievedChunk = {
   source: string;

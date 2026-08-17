@@ -2,6 +2,7 @@ import { NEED_OPTIONS, type NeedOption } from "./config";
 import { cosine, loadChunks, loadHistory, loadVisitor } from "./db";
 import { embedQuery } from "./openrouter";
 import { buildQuote } from "./pricing";
+import { isSiteTour } from "./tour";
 import type { AssistantState, ChatTurn, Intent, RetrievedChunk } from "./types";
 
 const EMAIL_RE = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
@@ -34,11 +35,12 @@ export function detectIntent(text: string, history: ChatTurn[], hasLead: boolean
     (turn) => turn.role === "assistant" && /name|email/i.test(turn.content) && /follow up|handoff|team|human|brief/i.test(turn.content),
   );
   if (waitingForLead && (extractEmail(text) || extractName(text, history) || hasLead)) return "handoff";
+  if (isSiteTour(text)) return "tour";
   if (/(talk to (a )?human|speak to|contact (the )?team|talk to rehan|hire|start a build|book|schedule|nda|contract|legal|call me|email me)/i.test(t)) {
     return "handoff";
   }
   if (/(how much|pricing|price|cost|quote|estimate|budget|estimator)/i.test(t)) return "quote";
-  if (/(take me|show me|tour|navigate|go to|open the|scroll)/i.test(t) || /#(why|services|method|estimator|solutions|contact|top)/i.test(t)) {
+  if (/(take me|show me|navigate|go to|open the|scroll)/i.test(t) || /#(why|services|method|estimator|solutions|contact|top)/i.test(t)) {
     return "navigate";
   }
   return "qa";
@@ -53,7 +55,6 @@ export function detectNavigate(text: string) {
   if (/service|capabilit/.test(t)) return "/#services";
   if (/solution|pattern/.test(t)) return "/#solutions";
   if (/why|about the studio/.test(t)) return "/#why";
-  if (/tour|walk me|show me (the )?site|around the site/.test(t)) return "/#services";
   return null;
 }
 
@@ -100,7 +101,7 @@ Rules:
 - Ground answers in the knowledge. If you cannot, do not invent facts, emails, phone numbers, client names, or guarantees.
 - Quotes are indicative ranges, never a contract.
 - Never write "User Safety", "Response Safety", or any safety labels.
-- Never show control syntax to the visitor. If you need to move the page, put [[NAVIGATE:/#services]] or [[NAVIGATE:/blog]] alone on the last line. In the spoken reply, say something natural such as "I'll take you to Capabilities."
+- If the visitor asks for a site tour, do not dump every section in one list. The product plays the tour itself. For a single section request, put [[NAVIGATE:/#services]] or [[NAVIGATE:/blog]] alone on the last line and say something natural such as "I'll take you to Capabilities."
 - When a human should take over, put [[HANDOFF]] alone on the last line. Then politely ask only for name and email if they are missing. Do not re-ask the project story if it is already in the thread.
 - If a brief was already sent, confirm that and do not pretend to email from a personal inbox.
 - Keep replies concise, professional, and specific. Write only visitor-facing prose besides those hidden control lines.

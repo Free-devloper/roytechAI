@@ -97,6 +97,11 @@ function prepareGenerateNode(state: GraphState) {
   };
 }
 
+function afterIntent(state: GraphState) {
+  if (state.intent === "tour") return "prepareGenerate";
+  return "retrieve";
+}
+
 function afterRetrieve(state: GraphState) {
   if (state.intent === "quote" || /(quote|estimate|price|cost|budget)/i.test(state.lastUserMessage)) {
     return "buildQuote";
@@ -113,7 +118,10 @@ export function createAssistantGraph() {
     .addNode("prepareGenerate", prepareGenerateNode)
     .addEdge(START, "loadHistory")
     .addEdge("loadHistory", "routeIntent")
-    .addEdge("routeIntent", "retrieve")
+    .addConditionalEdges("routeIntent", afterIntent, {
+      retrieve: "retrieve",
+      prepareGenerate: "prepareGenerate",
+    })
     .addConditionalEdges("retrieve", afterRetrieve, {
       buildQuote: "buildQuote",
       prepareGenerate: "prepareGenerate",

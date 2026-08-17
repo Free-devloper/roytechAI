@@ -389,7 +389,11 @@
 .rt-assistant-form { display: flex; gap: 8px; padding: 12px 14px 14px; border-top: 1px solid var(--line); }
 .rt-assistant-form input { flex: 1; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-size: 13px; outline: none; }
 .rt-assistant-form input:focus { border-color: var(--lime); }
-.rt-assistant-form button { background: var(--lime); color: #ffffff; border: 0; border-radius: 8px; font-size: 12px; font-weight: 800; padding: 0 14px; cursor: pointer; }
+.rt-assistant-form button { background: var(--lime); color: #ffffff; border: 0; border-radius: 8px; font-size: 12px; font-weight: 800; padding: 0 14px; cursor: pointer; min-width: 118px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+.rt-assistant-form button:disabled { cursor: not-allowed; }
+.rt-assistant-form button.rt-send-busy { background: #0d517c; }
+.rt-send-spinner { width: 12px; height: 12px; border: 2px solid rgba(255, 255, 255, 0.35); border-top-color: #ffffff; border-radius: 50%; animation: rt-spin .7s linear infinite; }
+@keyframes rt-spin { to { transform: rotate(360deg); } }
 @media (max-width: 720px) {
   .rt-assistant { right: 10px; bottom: 10px; left: 10px; align-items: stretch; }
   .rt-assistant-panel { width: 100%; height: min(84vh, calc(100vh - 84px)); }
