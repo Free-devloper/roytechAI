@@ -8,11 +8,11 @@
     { "source": "/((?!api/|assets/|robots.txt|sitemap.xml).*)", "destination": "/index.html" }
   ],
   "functions": {
-    "api/assistant.ts": {
-      "includeFiles": "{data/**,knowledge/**,node_modules/sql.js/dist/**}",
+    "api/assistant.js": {
+      "includeFiles": "data/chunks.json",
       "maxDuration": 60
     },
-    "api/contact.ts": {
+    "api/contact.js": {
       "maxDuration": 15
     }
   }

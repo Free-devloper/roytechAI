@@ -121,19 +121,17 @@ async function main() {
     );
   `);
 
+  const stored = [];
   const batchSize = 16;
   for (let i = 0; i < chunks.length; i += batchSize) {
     const batch = chunks.slice(i, i + batchSize);
     const embeddings = await embedBatch(batch.map((item) => item.text), models, apiKey);
     const insert = database.prepare("INSERT INTO chunks (id, source, section, text, embedding) VALUES (?, ?, ?, ?, ?)");
     batch.forEach((item, offset) => {
-      insert.run([
-        `${item.source}:${i + offset}`,
-        item.source,
-        item.section,
-        item.text,
-        JSON.stringify(embeddings[offset]),
-      ]);
+      const id = `${item.source}:${i + offset}`;
+      const embedding = embeddings[offset];
+      insert.run([id, item.source, item.section, item.text, JSON.stringify(embedding)]);
+      stored.push({ id, source: item.source, section: item.section, text: item.text, embedding });
     });
     insert.free();
     console.log(`Embedded ${Math.min(i + batchSize, chunks.length)} / ${chunks.length}`);
@@ -143,7 +141,8 @@ async function main() {
   mkdirSync(outDir, { recursive: true });
   const outPath = join(outDir, "assistant.db");
   writeFileSync(outPath, Buffer.from(database.export()));
-  console.log(`Wrote ${chunks.length} chunks to ${outPath}`);
+  writeFileSync(join(outDir, "chunks.json"), JSON.stringify(stored));
+  console.log(`Wrote ${stored.length} chunks to ${outPath} and data/chunks.json`);
 }
 
 main().catch((error) => {

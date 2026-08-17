@@ -42,3 +42,5 @@ next-env.d.ts
 /.sites-runtime/
 /outputs/
 /work/
+/api/assistant.js
+/api/contact.js
