@@ -51,5 +51,21 @@ export type SseEvent =
   | { type: "done" }
   | { type: "error"; message: string };
 
-export const NAVIGATE_RE = /\[\[NAVIGATE:([^\]]+)\]\]/g;
-export const HANDOFF_RE = /\[\[HANDOFF\]\]/g;
+export const NAVIGATE_RE = /\[\[NAVIGATE:([^\]]+)\]\]/gi;
+export const HANDOFF_RE = /\[\[HANDOFF\]\]/gi;
+const SAFETY_RE = /(?:^|\n)\s*(?:user|response)\s*safety\s*:\s*\w+\s*/gi;
+const SAFETY_INLINE_RE = /\b(?:user|response)\s*safety\s*:\s*\w+/gi;
+
+export function sanitizeAssistantText(text: string, streaming = false) {
+  let out = text
+    .replace(NAVIGATE_RE, "")
+    .replace(HANDOFF_RE, "")
+    .replace(SAFETY_RE, "\n")
+    .replace(SAFETY_INLINE_RE, "");
+  if (streaming) {
+    const open = out.lastIndexOf("[[");
+    const close = out.lastIndexOf("]]");
+    if (open > close) out = out.slice(0, open);
+  }
+  return out.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").replace(/^\s+/g, "");
+}

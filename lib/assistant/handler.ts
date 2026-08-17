@@ -3,7 +3,7 @@ import { persistTurn, persistVisitor } from "./db";
 import { assistantGraph } from "./graph";
 import { streamChat, toOpenRouterMessages } from "./openrouter";
 import { VISITOR_COOKIE } from "./config";
-import { HANDOFF_RE, NAVIGATE_RE, type ChatTurn, type SseEvent } from "./types";
+import { HANDOFF_RE, NAVIGATE_RE, sanitizeAssistantText, type ChatTurn, type SseEvent } from "./types";
 
 function cookieValue(header: string | null, name: string) {
   if (!header) return null;
@@ -24,7 +24,7 @@ function sseLine(event: SseEvent) {
 }
 
 function stripControl(text: string) {
-  return text.replace(NAVIGATE_RE, "").replace(HANDOFF_RE, "").replace(/\n{3,}/g, "\n\n").trim();
+  return sanitizeAssistantText(text, false);
 }
 
 function missingLead(name: string | null, email: string | null): "name" | "email" | "both" | null {
@@ -77,11 +77,19 @@ export async function handleAssistantRequest(request: Request) {
         if (state.navigateTo) send({ type: "navigate", target: state.navigateTo });
 
         let raw = "";
+        let flushed = "";
         const llmMessages = toOpenRouterMessages(state.systemPrompt, state.messages.slice(-12));
         for await (const token of streamChat(llmMessages)) {
           raw += token;
-          const visible = token.replace(NAVIGATE_RE, "").replace(HANDOFF_RE, "");
-          if (visible) send({ type: "token", content: visible });
+          const visible = sanitizeAssistantText(raw, true);
+          if (visible.length > flushed.length) {
+            send({ type: "token", content: visible.slice(flushed.length) });
+            flushed = visible;
+          }
+        }
+        const finalVisible = sanitizeAssistantText(raw, false);
+        if (finalVisible.length > flushed.length) {
+          send({ type: "token", content: finalVisible.slice(flushed.length) });
         }
 
         const navigateMatch = [...raw.matchAll(NAVIGATE_RE)].pop();
