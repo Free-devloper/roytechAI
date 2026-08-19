@@ -541,6 +541,7 @@ export default function AssistantWidget() {
         };
         revealRaf = requestAnimationFrame(tick);
       };
+      let pendingNavigate: string | null = null;
       revealSpeech = revealWithSpeech;
       return (event: VoiceEvent) => {
         if (event.type === "session") setVisitorId(event.visitorId);
@@ -563,15 +564,21 @@ export default function AssistantWidget() {
             spoken = rawBuffer;
             setLiveText(sanitizeAssistantText(rawBuffer, true));
           }
+          if (pendingNavigate && !audioRef.current?.busy) {
+            navigateTo(pendingNavigate);
+            pendingNavigate = null;
+          }
         }
         if (event.type === "audio") {
           if (event.content) rawBuffer += event.content;
           setVoicePhase("speaking");
           micRef.current?.pause();
-          audioRef.current?.enqueue(event);
+          const target = pendingNavigate;
+          pendingNavigate = null;
+          audioRef.current?.enqueue({ ...event, navigateTo: target || undefined });
         }
         if (event.type === "navigate") {
-          navigateTo(event.target);
+          pendingNavigate = event.target;
           updateThis((prev) =>
             patchLastAssistant(prev, {
               action: { kind: "navigate", label: sectionLabel(event.target), target: event.target },
@@ -592,6 +599,10 @@ export default function AssistantWidget() {
           });
         }
         if (event.type === "done") {
+          if (pendingNavigate && !audioRef.current?.busy) {
+            navigateTo(pendingNavigate);
+            pendingNavigate = null;
+          }
           turnOpenRef.current = false;
           const finalText = sanitizeAssistantText(rawBuffer || spoken, false);
           if (finalText) updateThis((prev) => patchLastAssistant(prev, { content: finalText }));
@@ -610,6 +621,7 @@ export default function AssistantWidget() {
       micRef.current = mic;
       const audio = new AudioQueue();
       audio.onSpeak = (content, durationMs) => revealSpeech?.(content, durationMs);
+      audio.onNavigate = (target) => navigateTo(target);
       audio.onIdle = () => {
         if (!liveRef.current || turnOpenRef.current) return;
         setLiveText("");

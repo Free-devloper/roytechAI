@@ -201,6 +201,7 @@ export type SpeechPlayback = {
   data: string;
   rate?: number;
   content?: string;
+  navigateTo?: string;
 };
 
 export class AudioQueue {
@@ -209,6 +210,7 @@ export class AudioQueue {
   private stopped = false;
   onIdle: (() => void) | null = null;
   onSpeak: ((content: string, durationMs: number) => void) | null = null;
+  onNavigate: ((target: string) => void) | null = null;
 
   enqueue(clip: SpeechPlayback) {
     if (this.stopped) return;
@@ -232,6 +234,7 @@ export class AudioQueue {
       const clip = this.queue.shift();
       if (!clip) break;
       try {
+        if (clip.navigateTo) this.onNavigate?.(clip.navigateTo);
         await playAudioClip(clip, (durationMs) => {
           if (clip.content) this.onSpeak?.(clip.content, durationMs);
         });

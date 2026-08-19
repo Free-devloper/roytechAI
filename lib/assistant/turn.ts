@@ -3,7 +3,7 @@ import { persistTurn, persistVisitor } from "./db";
 import { assistantGraph } from "./graph";
 import { streamChat, toOpenRouterMessages } from "./openrouter";
 import { cleanLeadName, historyHasLeadAsk, historyShowsHandoffSent } from "./prepare";
-import { takeSentences, type SpeechClip } from "./speech";
+import { clipDurationMs, estimateSpeechMs, takeSentences, type SpeechClip } from "./speech";
 import {
   HANDOFF_CALL_RE,
   HANDOFF_RE,
@@ -127,22 +127,25 @@ export async function runAssistantTurn(
   let speakTail = Promise.resolve();
   const emitSpoken = (text: string, waitFor = true) => {
     const visible = sanitizeAssistantText(text, false).trim();
-    if (!visible) return speakTail;
+    if (!visible) return speakTail.then(() => 0);
+    let duration = estimateSpeechMs(visible);
     if (!speak) {
       send({ type: "token", content: visible });
-      return speakTail;
+      return speakTail.then(() => duration);
     }
     const clipPromise = speak(visible);
     speakTail = speakTail.then(async () => {
       try {
         const clip = await clipPromise;
-        if (clip) send({ type: "audio", content: visible, ...clip });
-        else send({ type: "token", content: visible });
+        if (clip) {
+          duration = clipDurationMs(clip) || duration;
+          send({ type: "audio", content: visible, ...clip });
+        } else send({ type: "token", content: visible });
       } catch {
         send({ type: "token", content: visible });
       }
     });
-    return waitFor ? speakTail : Promise.resolve();
+    return (waitFor ? speakTail : Promise.resolve()).then(() => duration);
   };
 
   const shouldSubmitLeads = (spoken = raw) => {
@@ -216,24 +219,26 @@ export async function runAssistantTurn(
       continueTour && !isSiteTour(message) ? Math.min(TOUR_STOPS.length, lastTourStopIndex(state.messages) + 1) : 0;
     const stops = TOUR_STOPS.slice(startAt);
     let spoken = startAt === 0 ? TOUR_INTRO : "";
-    if (startAt === 0) await emitSpoken(TOUR_INTRO);
+    if (startAt === 0) {
+      const introMs = await emitSpoken(TOUR_INTRO);
+      if (!speak) await wait(introMs);
+    }
     if (stops.length === 0) {
       spoken += TOUR_CLOSE;
-      await emitSpoken(TOUR_CLOSE);
+      const closeMs = await emitSpoken(TOUR_CLOSE);
+      if (!speak) await wait(closeMs);
     } else {
       for (const stop of stops) {
         send({ type: "navigate", target: stop.target });
         const step = tourStepMarkdown(stop);
         spoken += step;
-        const started = Date.now();
-        await emitSpoken(step);
-        const remaining = 2400 - (Date.now() - started);
-        if (remaining > 0) await wait(remaining);
+        const stepMs = await emitSpoken(step);
+        if (!speak) await wait(stepMs);
       }
       send({ type: "navigate", target: "/#top" });
-      await wait(900);
       spoken += TOUR_CLOSE;
-      await emitSpoken(TOUR_CLOSE);
+      const closeMs = await emitSpoken(TOUR_CLOSE);
+      if (!speak) await wait(closeMs);
     }
     if (input.allowHangup && !CLOSE_OFFER_RE.test(spoken)) {
       spoken += CLOSE_OFFER;

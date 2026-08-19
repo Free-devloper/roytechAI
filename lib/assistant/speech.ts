@@ -30,6 +30,24 @@ export type SpeechClip = {
   rate?: number;
 };
 
+export function clipDurationMs(clip: SpeechClip) {
+  try {
+    const size =
+      typeof Buffer !== "undefined" ? Buffer.from(clip.data, "base64").byteLength : Math.floor((clip.data.length * 3) / 4);
+    if (clip.mime.includes("pcm") && clip.rate) {
+      return Math.round((size / 2 / clip.rate) * 1000);
+    }
+  } catch {
+    // ignore
+  }
+  return 0;
+}
+
+export function estimateSpeechMs(text: string) {
+  const words = speakableText(text).split(/\s+/).filter(Boolean).length;
+  return Math.max(2800, Math.round((words / 2.35) * 1000) + 700);
+}
+
 export async function transcribeAudio(audioBase64: string, format: string) {
   const clean = audioBase64.replace(/^data:[^;]+;base64,/, "");
   const candidates = Array.from(new Set([sttModel(), "openai/whisper-1", "openai/gpt-4o-mini-transcribe"]));
