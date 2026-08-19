@@ -24,7 +24,7 @@ export function extractSpokenEmail(text: string) {
   if (direct) return direct;
   const normalized = text
     .replace(/\b(?:dot|period)\b/gi, ".")
-    .replace(/\b(?:at the|at)\b/gi, "@")
+    .replace(/\b(?:at the rate of|at the rate|at)\b/gi, "@")
     .replace(/\s*([.@])\s*/g, "$1");
   return extractEmail(normalized) || extractEmail(normalized.replace(/\s+/g, ""));
 }
