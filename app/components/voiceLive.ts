@@ -131,7 +131,12 @@ export function base64ToBytes(value: string) {
   return bytes;
 }
 
-async function playPcm16(bytes: Uint8Array, sampleRate: number, onStart?: (durationMs: number) => void) {
+async function playPcm16(
+  bytes: Uint8Array,
+  sampleRate: number,
+  onStart?: (durationMs: number) => void,
+  onStopReady?: (stop: () => void) => void,
+) {
   const context = getPlaybackContext();
   const samples = Math.floor(bytes.byteLength / 2);
   const buffer = context.createBuffer(1, samples, sampleRate);
@@ -140,11 +145,27 @@ async function playPcm16(bytes: Uint8Array, sampleRate: number, onStart?: (durat
   for (let i = 0; i < samples; i += 1) channel[i] = view.getInt16(i * 2, true) / 32768;
   await context.resume();
   onStart?.((samples / sampleRate) * 1000);
+  let finished = false;
   await new Promise<void>((resolve) => {
     const source = context.createBufferSource();
     source.buffer = buffer;
     source.connect(context.destination);
-    source.onended = () => resolve();
+    source.onended = () => {
+      if (finished) return;
+      finished = true;
+      resolve();
+    };
+    onStopReady?.(() => {
+      try {
+        source.stop();
+      } catch {
+        // ignore
+      }
+      if (!finished) {
+        finished = true;
+        resolve();
+      }
+    });
     source.start();
   });
 }
@@ -160,16 +181,40 @@ function getPlaybackContext() {
 export async function playAudioClip(
   clip: { mime: string; data: string; rate?: number },
   onStart?: (durationMs: number) => void,
+  onStopReady?: (stop: () => void) => void,
 ) {
   const bytes = base64ToBytes(clip.data);
   if (clip.mime.includes("pcm") && !(bytes[0] === 0x52 && bytes[1] === 0x49)) {
-    await playPcm16(bytes, clip.rate || 24000, onStart);
+    await playPcm16(bytes, clip.rate || 24000, onStart, onStopReady);
     return;
   }
   const mime = clip.mime.includes("wav") ? "audio/wav" : clip.mime.includes("pcm") ? "audio/wav" : "audio/mpeg";
   const url = URL.createObjectURL(new Blob([bytes], { type: mime }));
   try {
     const audio = new Audio(url);
+    let settled = false;
+    let resolvePlayback: (() => void) | null = null;
+    let rejectPlayback: ((err: Error) => void) | null = null;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      resolvePlayback?.();
+    };
+    const fail = (err: Error) => {
+      if (settled) return;
+      settled = true;
+      rejectPlayback?.(err);
+    };
+    onStopReady?.(() => {
+      try {
+        audio.pause();
+        audio.currentTime = 0;
+      } catch {
+        // ignore
+      }
+      finish();
+    });
+
     await new Promise<void>((resolve, reject) => {
       if (audio.readyState >= 1) {
         resolve();
@@ -184,12 +229,22 @@ export async function playAudioClip(
         window.clearTimeout(timer);
         reject(new Error("Could not load speech audio."));
       };
+    }).then(() => {
+      onStart?.((Number.isFinite(audio.duration) ? audio.duration : 0) * 1000);
     });
-    onStart?.((Number.isFinite(audio.duration) ? audio.duration : 0) * 1000);
-    await audio.play();
+    try {
+      await audio.play();
+    } catch {
+      // If playback can't start, treat it like a short stop.
+      finish();
+      return;
+    }
+
     await new Promise<void>((resolve, reject) => {
-      audio.onended = () => resolve();
-      audio.onerror = () => reject(new Error("Could not play speech audio."));
+      resolvePlayback = resolve;
+      rejectPlayback = (err) => reject(err);
+      audio.onended = () => finish();
+      audio.onerror = () => fail(new Error("Could not play speech audio."));
     });
   } finally {
     URL.revokeObjectURL(url);
@@ -211,6 +266,7 @@ export class AudioQueue {
   onIdle: (() => void) | null = null;
   onSpeak: ((content: string, durationMs: number) => void) | null = null;
   onNavigate: ((target: string) => void) | null = null;
+  private currentStop: (() => void) | null = null;
 
   enqueue(clip: SpeechPlayback) {
     if (this.stopped) return;
@@ -221,6 +277,16 @@ export class AudioQueue {
   stop() {
     this.stopped = true;
     this.queue = [];
+    this.currentStop?.();
+    this.currentStop = null;
+  }
+
+  cancelCurrent() {
+    // Used for "barge-in": stop current TTS immediately and drop queued clips,
+    // but keep the queue usable for the next assistant response.
+    this.queue = [];
+    this.currentStop?.();
+    this.currentStop = null;
   }
 
   get busy() {
@@ -234,15 +300,23 @@ export class AudioQueue {
       const clip = this.queue.shift();
       if (!clip) break;
       try {
+        this.currentStop = null;
         if (clip.navigateTo) this.onNavigate?.(clip.navigateTo);
-        await playAudioClip(clip, (durationMs) => {
-          if (clip.content) this.onSpeak?.(clip.content, durationMs);
-        });
+        await playAudioClip(
+          clip,
+          (durationMs) => {
+            if (clip.content) this.onSpeak?.(clip.content, durationMs);
+          },
+          (stop) => {
+            this.currentStop = stop;
+          },
+        );
       } catch {
         if (clip.content) this.onSpeak?.(clip.content, 0);
       }
     }
     this.playing = false;
+    this.currentStop = null;
     if (!this.stopped && this.queue.length === 0) this.onIdle?.();
   }
 }
@@ -272,6 +346,10 @@ export class MicCapture {
   private silentFor = 0;
   private lastTs = 0;
   onUtterance: ((blob: Blob, format: string) => void) | null = null;
+  onSpeechStart: (() => void) | null = null;
+  private bargeInEnabled = false;
+  private bargeInThreshold = 0.065;
+  private bargeInStartHoldMs = 220;
   readonly mime = pickRecorderMime();
   readonly format = formatFromMime(this.mime);
 
@@ -290,12 +368,22 @@ export class MicCapture {
 
   arm() {
     this.armed = true;
+    this.bargeInEnabled = false;
+  }
+
+  enableBargeIn() {
+    this.armed = true;
+    this.bargeInEnabled = true;
+    this.speaking = false;
+    this.silentFor = 0;
+    this.stopRecorder(false);
   }
 
   pause() {
     this.armed = false;
     this.speaking = false;
     this.silentFor = 0;
+    this.bargeInEnabled = false;
     this.stopRecorder(false);
   }
 
@@ -323,10 +411,16 @@ export class MicCapture {
       const rms = Math.sqrt(sum / data.length);
       const dt = this.lastTs ? Math.min(80, ts - this.lastTs) : 16;
       this.lastTs = ts;
-      if (rms > 0.045) {
+      const threshold = this.bargeInEnabled ? this.bargeInThreshold : 0.045;
+      if (rms > threshold) {
         if (!this.speaking) {
           this.speaking = true;
           this.startedAt = ts;
+          this.onSpeechStart?.();
+          // In barge-in mode we wait a brief moment before recording to avoid echo spikes.
+          if (!this.bargeInEnabled) this.startRecorder();
+        }
+        if (this.bargeInEnabled && !this.recorder && ts - this.startedAt >= this.bargeInStartHoldMs) {
           this.startRecorder();
         }
         this.silentFor = 0;

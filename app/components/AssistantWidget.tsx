@@ -209,6 +209,8 @@ export default function AssistantWidget() {
   const listRef = useRef<HTMLDivElement>(null);
   const liveRef = useRef(false);
   const hangupRef = useRef(false);
+  const bargeInRef = useRef(false);
+  const assistantSpeakingRef = useRef(false);
   const turnOpenRef = useRef(false);
   const channelRef = useRef<VoiceChannel | null>(null);
   const micRef = useRef<MicCapture | null>(null);
@@ -544,6 +546,9 @@ export default function AssistantWidget() {
       let pendingNavigate: string | null = null;
       revealSpeech = revealWithSpeech;
       return (event: VoiceEvent) => {
+        // "Barge-in": if the visitor started speaking while we were talking,
+        // stop applying assistant events (except `done`) to avoid enqueuing more TTS.
+        if (!includeUser && bargeInRef.current && event.type !== "done") return;
         if (event.type === "session") setVisitorId(event.visitorId);
         if (event.type === "transcript") {
           if (isSiteTour(event.text)) setTouring(true);
@@ -572,7 +577,8 @@ export default function AssistantWidget() {
         if (event.type === "audio") {
           if (event.content) rawBuffer += event.content;
           setVoicePhase("speaking");
-          micRef.current?.pause();
+          assistantSpeakingRef.current = true;
+          micRef.current?.enableBargeIn();
           const target = pendingNavigate;
           pendingNavigate = null;
           audioRef.current?.enqueue({ ...event, navigateTo: target || undefined });
@@ -599,6 +605,7 @@ export default function AssistantWidget() {
           });
         }
         if (event.type === "done") {
+          assistantSpeakingRef.current = false;
           if (pendingNavigate && !audioRef.current?.busy) {
             navigateTo(pendingNavigate);
             pendingNavigate = null;
@@ -617,6 +624,16 @@ export default function AssistantWidget() {
     try {
       const mic = new MicCapture();
       await mic.start();
+      mic.onSpeechStart = () => {
+        // Only treat as an interruption when we are actually talking.
+        if (!liveRef.current) return;
+        if (!assistantSpeakingRef.current) return;
+        bargeInRef.current = true;
+        audioRef.current?.cancelCurrent();
+        setVoicePhase("listening");
+        setLiveText("");
+        setTouring(false);
+      };
       mic.pause();
       micRef.current = mic;
       const audio = new AudioQueue();
@@ -647,6 +664,8 @@ export default function AssistantWidget() {
       }
       mic.onUtterance = async (blob, format) => {
         if (!liveRef.current || !channelRef.current) return;
+        bargeInRef.current = false;
+        assistantSpeakingRef.current = false;
         mic.pause();
         setVoicePhase("thinking");
         setError(null);
