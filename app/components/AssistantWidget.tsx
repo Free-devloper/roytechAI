@@ -546,9 +546,7 @@ export default function AssistantWidget() {
       let pendingNavigate: string | null = null;
       revealSpeech = revealWithSpeech;
       return (event: VoiceEvent) => {
-        // "Barge-in": if the visitor started speaking while we were talking,
-        // stop applying assistant events (except `done`) to avoid enqueuing more TTS.
-        if (!includeUser && bargeInRef.current && event.type !== "done") return;
+        if (bargeInRef.current && event.type === "audio") return;
         if (event.type === "session") setVisitorId(event.visitorId);
         if (event.type === "transcript") {
           if (isSiteTour(event.text)) setTouring(true);
@@ -606,6 +604,7 @@ export default function AssistantWidget() {
         }
         if (event.type === "done") {
           assistantSpeakingRef.current = false;
+          bargeInRef.current = false;
           if (pendingNavigate && !audioRef.current?.busy) {
             navigateTo(pendingNavigate);
             pendingNavigate = null;
@@ -624,11 +623,11 @@ export default function AssistantWidget() {
     try {
       const mic = new MicCapture();
       await mic.start();
-      mic.onSpeechStart = () => {
-        // Only treat as an interruption when we are actually talking.
+      mic.onBargeIn = () => {
         if (!liveRef.current) return;
         if (!assistantSpeakingRef.current) return;
         bargeInRef.current = true;
+        assistantSpeakingRef.current = false;
         audioRef.current?.cancelCurrent();
         setVoicePhase("listening");
         setLiveText("");

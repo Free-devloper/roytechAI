@@ -346,10 +346,11 @@ export class MicCapture {
   private silentFor = 0;
   private lastTs = 0;
   onUtterance: ((blob: Blob, format: string) => void) | null = null;
-  onSpeechStart: (() => void) | null = null;
+  onBargeIn: (() => void) | null = null;
   private bargeInEnabled = false;
-  private bargeInThreshold = 0.065;
-  private bargeInStartHoldMs = 220;
+  private bargeInThreshold = 0.08;
+  private bargeInConfirmMs = 500;
+  private bargeInFired = false;
   readonly mime = pickRecorderMime();
   readonly format = formatFromMime(this.mime);
 
@@ -374,6 +375,7 @@ export class MicCapture {
   enableBargeIn() {
     this.armed = true;
     this.bargeInEnabled = true;
+    this.bargeInFired = false;
     this.speaking = false;
     this.silentFor = 0;
     this.stopRecorder(false);
@@ -416,11 +418,11 @@ export class MicCapture {
         if (!this.speaking) {
           this.speaking = true;
           this.startedAt = ts;
-          this.onSpeechStart?.();
-          // In barge-in mode we wait a brief moment before recording to avoid echo spikes.
           if (!this.bargeInEnabled) this.startRecorder();
         }
-        if (this.bargeInEnabled && !this.recorder && ts - this.startedAt >= this.bargeInStartHoldMs) {
+        if (this.bargeInEnabled && !this.bargeInFired && ts - this.startedAt >= this.bargeInConfirmMs) {
+          this.bargeInFired = true;
+          this.onBargeIn?.();
           this.startRecorder();
         }
         this.silentFor = 0;
