@@ -349,7 +349,9 @@ export class MicCapture {
   onBargeIn: (() => void) | null = null;
   private bargeInEnabled = false;
   private bargeInThreshold = 0.08;
-  private bargeInConfirmMs = 500;
+  // Start recording immediately on speech, but only trigger the barge-in cancellation
+  // after we confirm sustained speech. This avoids missing the first spoken word.
+  private bargeInConfirmMs = 300;
   private bargeInFired = false;
   readonly mime = pickRecorderMime();
   readonly format = formatFromMime(this.mime);
@@ -418,12 +420,13 @@ export class MicCapture {
         if (!this.speaking) {
           this.speaking = true;
           this.startedAt = ts;
-          if (!this.bargeInEnabled) this.startRecorder();
+          // In barge-in mode, we start recording immediately so the ASR captures
+          // the first word (e.g. "end" in "end the call").
+          this.startRecorder();
         }
         if (this.bargeInEnabled && !this.bargeInFired && ts - this.startedAt >= this.bargeInConfirmMs) {
           this.bargeInFired = true;
           this.onBargeIn?.();
-          this.startRecorder();
         }
         this.silentFor = 0;
       } else if (this.speaking) {
